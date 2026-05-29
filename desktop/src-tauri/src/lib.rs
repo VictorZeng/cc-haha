@@ -2189,7 +2189,9 @@ pub fn run() {
             webview_panel::preview_navigate,
             webview_panel::preview_set_bounds,
             webview_panel::preview_set_visible,
-            webview_panel::preview_close
+            webview_panel::preview_close,
+            webview_panel::preview_message,
+            webview_panel::preview_eval
         ]);
 
     // macOS: native menu bar (traffic-light overlay style)

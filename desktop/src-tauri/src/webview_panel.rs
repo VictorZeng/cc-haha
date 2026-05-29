@@ -1,5 +1,5 @@
 use std::sync::Mutex;
-use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Runtime, WebviewBuilder, WebviewUrl};
+use tauri::{AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Runtime, WebviewBuilder, WebviewUrl};
 
 const PREVIEW_LABEL: &str = "preview";
 
@@ -126,6 +126,21 @@ pub async fn preview_close<R: Runtime>(
     }
     state.0.lock().unwrap().created = false;
     Ok(())
+}
+
+/// 页面 → 宿主：注入脚本经 IPC 调此命令；Rust 校验后转发给前端。
+#[tauri::command]
+pub fn preview_message<R: Runtime>(app: AppHandle<R>, raw: String) -> Result<(), String> {
+    // 仅转发 JSON 字符串；前端做强类型解析（schema 校验在 TS 侧 protocol）
+    serde_json::from_str::<serde_json::Value>(&raw).map_err(|e| e.to_string())?;
+    app.emit("preview://event", raw).map_err(|e| e.to_string())
+}
+
+/// 宿主 → 页面：在子 webview 内 eval 一段 JS。
+#[tauri::command]
+pub async fn preview_eval<R: Runtime>(app: AppHandle<R>, js: String) -> Result<(), String> {
+    let webview = app.get_webview(PREVIEW_LABEL).ok_or_else(|| "preview not open".to_string())?;
+    webview.eval(&js).map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
