@@ -10,11 +10,16 @@ import { useUpdateStore } from '../../stores/updateStore'
 describe('UpdateChecker', () => {
   beforeEach(() => {
     useSettingsStore.setState({ locale: 'en' })
-    Reflect.deleteProperty(window, 'desktopHost')
-    Object.defineProperty(window, '__TAURI__', {
-      value: {},
-      configurable: true,
-    })
+    Reflect.deleteProperty(window, '__TAURI__')
+    window.desktopHost = {
+      ...browserHost,
+      kind: 'electron',
+      isDesktop: true,
+      capabilities: {
+        ...browserHost.capabilities,
+        updates: true,
+      },
+    }
 
     useUpdateStore.setState({
       status: 'available',
@@ -48,7 +53,6 @@ describe('UpdateChecker', () => {
   })
 
   it('renders the update prompt in Electron desktop runtime', () => {
-    Reflect.deleteProperty(window, '__TAURI__')
     window.desktopHost = {
       ...browserHost,
       kind: 'electron',

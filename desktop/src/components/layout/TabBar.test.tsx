@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 import type { PerSessionState } from '../../stores/chatStore'
 import type { ChatState } from '../../types/chat'
+import { browserHost } from '../../lib/desktopHost/browserHost'
 
 const startDraggingMock = vi.hoisted(() => vi.fn(() => Promise.resolve()))
 const getCurrentWindowMock = vi.hoisted(() => vi.fn(() => ({
@@ -98,6 +99,22 @@ vi.mock('./WindowControls', () => ({
 }))
 
 describe('TabBar', () => {
+  const installElectronDesktopHost = () => {
+    window.desktopHost = {
+      ...browserHost,
+      kind: 'electron',
+      isDesktop: true,
+      capabilities: {
+        ...browserHost.capabilities,
+        windowControls: true,
+      },
+      window: {
+        ...browserHost.window,
+        startDragging: startDraggingMock,
+      },
+    }
+  }
+
   beforeEach(() => {
     class ResizeObserverMock {
       constructor(_callback: ResizeObserverCallback) {}
@@ -113,10 +130,8 @@ describe('TabBar', () => {
       value: ResizeObserverMock,
     })
 
-    Object.defineProperty(window, '__TAURI__', {
-      configurable: true,
-      value: {},
-    })
+    Reflect.deleteProperty(window, '__TAURI__')
+    installElectronDesktopHost()
 
     Object.defineProperty(window.HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
@@ -157,7 +172,8 @@ describe('TabBar', () => {
     useTerminalPanelStore.setState(useTerminalPanelStore.getInitialState(), true)
     useBrowserPanelStore.setState(useBrowserPanelStore.getInitialState(), true)
 
-    delete (window as typeof window & { __TAURI__?: unknown }).__TAURI__
+    Reflect.deleteProperty(window, 'desktopHost')
+    Reflect.deleteProperty(window, '__TAURI__')
   })
 
   it('scrolls the active tab into view when the active tab changes', async () => {
@@ -291,8 +307,8 @@ describe('TabBar', () => {
       render(<TabBar />)
     })
 
-    expect(screen.getByTestId('tab-bar')).not.toHaveAttribute('data-tauri-drag-region')
-    expect(screen.getByTestId('tab-bar-drag-gutter')).toHaveAttribute('data-tauri-drag-region')
+    expect(screen.getByTestId('tab-bar')).not.toHaveAttribute('data-desktop-drag-region')
+    expect(screen.getByTestId('tab-bar-drag-gutter')).toHaveAttribute('data-desktop-drag-region')
   })
 
   it('keeps the desktop tab strip at a roomier titlebar height', async () => {
@@ -452,7 +468,7 @@ describe('TabBar', () => {
   })
 
   it('hides the open-project control outside the desktop shell', async () => {
-    delete (window as typeof window & { __TAURI__?: unknown }).__TAURI__
+    Reflect.deleteProperty(window, 'desktopHost')
 
     const { TabBar } = await import('./TabBar')
     const { useTabStore } = await import('../../stores/tabStore')

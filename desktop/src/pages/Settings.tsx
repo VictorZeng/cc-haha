@@ -35,6 +35,7 @@ import { ClaudeOfficialLogin } from '../components/settings/ClaudeOfficialLogin'
 import { ChatGPTOfficialLogin } from '../components/settings/ChatGPTOfficialLogin'
 import { OPENAI_OFFICIAL_PROVIDER_ID } from '../constants/openaiOfficialProvider'
 import { useUpdateStore } from '../stores/updateStore'
+import { getBaseUrl } from '../api/client'
 import { formatBytes } from '../lib/formatBytes'
 import { isDesktopRuntime } from '../lib/desktopRuntime'
 import { getDesktopHost } from '../lib/desktopHost'
@@ -691,6 +692,7 @@ function updateSettingsJsonProviderConnection(
   apiKey: string,
   preset: ProviderPreset,
   baseUrl: string,
+  proxyBaseUrl: string,
 ): string {
   try {
     const parsed = JSON.parse(raw || '{}') as { env?: Record<string, unknown> }
@@ -700,13 +702,17 @@ function updateSettingsJsonProviderConnection(
     const env = { ...existingEnv }
     delete env.ANTHROPIC_API_KEY
     delete env.ANTHROPIC_AUTH_TOKEN
-    env.ANTHROPIC_BASE_URL = apiFormat !== 'anthropic' ? 'http://127.0.0.1:3456/proxy' : baseUrl
+    env.ANTHROPIC_BASE_URL = apiFormat !== 'anthropic' ? proxyBaseUrl : baseUrl
     Object.assign(env, buildSettingsJsonAuthEnv(apiFormat, authStrategy, apiKey, preset))
     parsed.env = env
     return JSON.stringify(parsed, null, 2)
   } catch {
     return raw
   }
+}
+
+function getProviderProxyBaseUrl(): string {
+  return `${getBaseUrl().replace(/\/$/, '')}/proxy`
 }
 
 function buildFallbackPreset(provider?: SavedProvider): ProviderPreset {
@@ -776,6 +782,7 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
   const [settingsJson, setSettingsJson] = useState('')
   const [settingsJsonError, setSettingsJsonError] = useState<string | null>(null)
   const jsonPastedRef = useRef(false)
+  const providerProxyBaseUrl = useMemo(() => getProviderProxyBaseUrl(), [])
 
   // Load current settings.json and merge provider env vars
   useEffect(() => {
@@ -802,7 +809,7 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
             ...(Object.keys(modelContextWindows).length > 0
               ? { [MODEL_CONTEXT_WINDOWS_ENV_KEY]: JSON.stringify(modelContextWindows) }
               : {}),
-            ANTHROPIC_BASE_URL: needsProxy ? 'http://127.0.0.1:3456/proxy' : baseUrl,
+            ANTHROPIC_BASE_URL: needsProxy ? providerProxyBaseUrl : baseUrl,
             ...buildSettingsJsonAuthEnv(apiFormat, authStrategy, apiKey, selectedPreset),
             ANTHROPIC_MODEL: normalizedModels.main,
             ANTHROPIC_DEFAULT_HAIKU_MODEL: normalizedModels.haiku,
@@ -816,7 +823,7 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
       })
     })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedPreset.id])
+  }, [selectedPreset.id, providerProxyBaseUrl])
 
   const handlePresetChange = (preset: ProviderPreset) => {
     setSelectedPreset(preset)
@@ -912,19 +919,19 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
   }
   const handleBaseUrlChange = (value: string) => {
     setBaseUrl(value)
-    setSettingsJson((current) => updateSettingsJsonProviderConnection(current, apiFormat, authStrategy, apiKey, selectedPreset, value))
+    setSettingsJson((current) => updateSettingsJsonProviderConnection(current, apiFormat, authStrategy, apiKey, selectedPreset, value, providerProxyBaseUrl))
   }
   const handleApiKeyChange = (value: string) => {
     setApiKey(value)
-    setSettingsJson((current) => updateSettingsJsonProviderConnection(current, apiFormat, authStrategy, value, selectedPreset, baseUrl))
+    setSettingsJson((current) => updateSettingsJsonProviderConnection(current, apiFormat, authStrategy, value, selectedPreset, baseUrl, providerProxyBaseUrl))
   }
   const handleApiFormatChange = (value: ApiFormat) => {
     setApiFormat(value)
-    setSettingsJson((current) => updateSettingsJsonProviderConnection(current, value, authStrategy, apiKey, selectedPreset, baseUrl))
+    setSettingsJson((current) => updateSettingsJsonProviderConnection(current, value, authStrategy, apiKey, selectedPreset, baseUrl, providerProxyBaseUrl))
   }
   const handleAuthStrategyChange = (value: ProviderAuthStrategy) => {
     setAuthStrategy(value)
-    setSettingsJson((current) => updateSettingsJsonProviderConnection(current, apiFormat, value, apiKey, selectedPreset, baseUrl))
+    setSettingsJson((current) => updateSettingsJsonProviderConnection(current, apiFormat, value, apiKey, selectedPreset, baseUrl, providerProxyBaseUrl))
   }
   const handleModelChange = (slot: ModelSlot, value: string) => {
     const nextModels = { ...models, [slot]: value }

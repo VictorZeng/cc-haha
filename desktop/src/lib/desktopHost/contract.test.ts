@@ -31,7 +31,7 @@ describe('desktop host contract', () => {
   })
 
   it('detects the browser fallback when native host globals are absent', () => {
-    expect(createDesktopHost({ electronHost: null, hasTauri: false })).toBe(browserHost)
+    expect(createDesktopHost({ electronHost: null })).toBe(browserHost)
   })
 
   it('prefers an injected Electron preload host over browser fallback', () => {
@@ -41,20 +41,15 @@ describe('desktop host contract', () => {
       isDesktop: true,
     }
 
-    expect(createDesktopHost({ electronHost, hasTauri: false })).toBe(electronHost)
+    expect(createDesktopHost({ electronHost })).toBe(electronHost)
   })
 
-  it('detects Tauri and Electron runtime globals without importing native modules', () => {
+  it('detects Electron runtime globals without importing native modules', () => {
     const originalDesktopHost = window.desktopHost
-    const originalTauri = window.__TAURI_INTERNALS__
 
     try {
       Reflect.deleteProperty(window, 'desktopHost')
-      Reflect.deleteProperty(window, '__TAURI_INTERNALS__')
-      expect(detectDesktopHostEnvironment()).toEqual({ electronHost: null, hasTauri: false })
-
-      window.__TAURI_INTERNALS__ = {}
-      expect(detectDesktopHostEnvironment()).toEqual({ electronHost: null, hasTauri: true })
+      expect(detectDesktopHostEnvironment()).toEqual({ electronHost: null })
 
       const electronHost = {
         ...browserHost,
@@ -62,18 +57,12 @@ describe('desktop host contract', () => {
         isDesktop: true,
       }
       window.desktopHost = electronHost
-      expect(detectDesktopHostEnvironment()).toEqual({ electronHost, hasTauri: true })
+      expect(detectDesktopHostEnvironment()).toEqual({ electronHost })
     } finally {
       if (typeof originalDesktopHost === 'undefined') {
         Reflect.deleteProperty(window, 'desktopHost')
       } else {
         window.desktopHost = originalDesktopHost
-      }
-
-      if (typeof originalTauri === 'undefined') {
-        Reflect.deleteProperty(window, '__TAURI_INTERNALS__')
-      } else {
-        window.__TAURI_INTERNALS__ = originalTauri
       }
     }
   })

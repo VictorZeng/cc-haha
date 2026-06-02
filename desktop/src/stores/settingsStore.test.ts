@@ -333,6 +333,22 @@ describe('settingsStore network persistence', () => {
 })
 
 describe('settingsStore app mode', () => {
+  const installElectronAppModeHost = (appMode: Partial<typeof browserHost.appMode>) => {
+    window.desktopHost = {
+      ...browserHost,
+      kind: 'electron',
+      isDesktop: true,
+      capabilities: {
+        ...browserHost.capabilities,
+        appMode: true,
+      },
+      appMode: {
+        ...browserHost.appMode,
+        ...appMode,
+      },
+    }
+  }
+
   beforeEach(() => {
     vi.resetModules()
     vi.clearAllMocks()
@@ -341,21 +357,19 @@ describe('settingsStore app mode', () => {
     Reflect.deleteProperty(window, '__TAURI__')
   })
 
-  it('hydrates app mode from the native desktop command', async () => {
-    const invoke = vi.fn().mockResolvedValue({
+  it('hydrates app mode from the Electron desktop host', async () => {
+    const getAppMode = vi.fn().mockResolvedValue({
       mode: 'portable',
       portableDir: 'C:\\cc-haha\\CLAUDE_CONFIG_DIR',
       defaultPortableDir: 'C:\\cc-haha\\CLAUDE_CONFIG_DIR',
     })
-    vi.doMock('@tauri-apps/api/core', () => ({ invoke }))
-    const tauriWindow = window as unknown as { __TAURI_INTERNALS__?: object }
-    tauriWindow.__TAURI_INTERNALS__ = {}
+    installElectronAppModeHost({ get: getAppMode })
 
     const { useSettingsStore } = await import('./settingsStore')
 
     await useSettingsStore.getState().fetchAppMode()
 
-    expect(invoke).toHaveBeenCalledWith('get_app_mode')
+    expect(getAppMode).toHaveBeenCalledTimes(1)
     expect(useSettingsStore.getState().appMode).toEqual({
       mode: 'portable',
       portableDir: 'C:\\cc-haha\\CLAUDE_CONFIG_DIR',
@@ -369,15 +383,7 @@ describe('settingsStore app mode', () => {
       portableDir: 'D:\\cc-haha\\data',
       defaultPortableDir: 'D:\\cc-haha\\data',
     })
-    window.desktopHost = {
-      ...browserHost,
-      kind: 'electron',
-      isDesktop: true,
-      appMode: {
-        ...browserHost.appMode,
-        get: getAppMode,
-      },
-    }
+    installElectronAppModeHost({ get: getAppMode })
 
     const { useSettingsStore } = await import('./settingsStore')
 
@@ -391,11 +397,9 @@ describe('settingsStore app mode', () => {
     })
   })
 
-  it('persists app mode through the native desktop command and marks restart required', async () => {
-    const invoke = vi.fn().mockResolvedValue(undefined)
-    vi.doMock('@tauri-apps/api/core', () => ({ invoke }))
-    const tauriWindow = window as unknown as { __TAURI_INTERNALS__?: object }
-    tauriWindow.__TAURI_INTERNALS__ = {}
+  it('persists app mode through the Electron desktop host and marks restart required', async () => {
+    const setAppMode = vi.fn().mockResolvedValue(undefined)
+    installElectronAppModeHost({ set: setAppMode })
 
     const { useSettingsStore } = await import('./settingsStore')
     useSettingsStore.setState({
@@ -409,7 +413,7 @@ describe('settingsStore app mode', () => {
 
     await useSettingsStore.getState().setAppMode('portable')
 
-    expect(invoke).toHaveBeenCalledWith('set_app_mode', {
+    expect(setAppMode).toHaveBeenCalledWith({
       mode: 'portable',
       portableDir: 'C:\\cc-haha\\CLAUDE_CONFIG_DIR',
     })
@@ -425,15 +429,7 @@ describe('settingsStore app mode', () => {
 
   it('persists app mode through an injected desktop host', async () => {
     const setAppMode = vi.fn().mockResolvedValue(undefined)
-    window.desktopHost = {
-      ...browserHost,
-      kind: 'electron',
-      isDesktop: true,
-      appMode: {
-        ...browserHost.appMode,
-        set: setAppMode,
-      },
-    }
+    installElectronAppModeHost({ set: setAppMode })
 
     const { useSettingsStore } = await import('./settingsStore')
     useSettingsStore.setState({
@@ -455,10 +451,8 @@ describe('settingsStore app mode', () => {
   })
 
   it('persists a user-selected portable directory', async () => {
-    const invoke = vi.fn().mockResolvedValue(undefined)
-    vi.doMock('@tauri-apps/api/core', () => ({ invoke }))
-    const tauriWindow = window as unknown as { __TAURI_INTERNALS__?: object }
-    tauriWindow.__TAURI_INTERNALS__ = {}
+    const setAppMode = vi.fn().mockResolvedValue(undefined)
+    installElectronAppModeHost({ set: setAppMode })
 
     const { useSettingsStore } = await import('./settingsStore')
     useSettingsStore.setState({
@@ -472,7 +466,7 @@ describe('settingsStore app mode', () => {
 
     await useSettingsStore.getState().setAppMode('portable', 'D:\\portable-data')
 
-    expect(invoke).toHaveBeenCalledWith('set_app_mode', {
+    expect(setAppMode).toHaveBeenCalledWith({
       mode: 'portable',
       portableDir: 'D:\\portable-data',
     })
@@ -485,10 +479,8 @@ describe('settingsStore app mode', () => {
   })
 
   it('switches app mode back to the system data source', async () => {
-    const invoke = vi.fn().mockResolvedValue(undefined)
-    vi.doMock('@tauri-apps/api/core', () => ({ invoke }))
-    const tauriWindow = window as unknown as { __TAURI_INTERNALS__?: object }
-    tauriWindow.__TAURI_INTERNALS__ = {}
+    const setAppMode = vi.fn().mockResolvedValue(undefined)
+    installElectronAppModeHost({ set: setAppMode })
 
     const { useSettingsStore } = await import('./settingsStore')
     useSettingsStore.setState({
@@ -504,7 +496,7 @@ describe('settingsStore app mode', () => {
 
     await useSettingsStore.getState().setAppMode('default', null)
 
-    expect(invoke).toHaveBeenCalledWith('set_app_mode', {
+    expect(setAppMode).toHaveBeenCalledWith({
       mode: 'default',
       portableDir: null,
     })

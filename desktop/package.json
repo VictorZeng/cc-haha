@@ -13,7 +13,7 @@
       "node_modules/node-pty/**",
       "src-tauri/binaries/**"
     ],
-    "artifactName": "Claude-Code-Haha-${version}-${arch}.${ext}",
+    "artifactName": "Claude-Code-Haha-${version}-${os}-${arch}.${ext}",
     "npmRebuild": false,
     "directories": {
       "output": "build-artifacts/electron"
@@ -73,7 +73,6 @@
     "electron:package:dir": "bun run clean:electron-output && bun run electron:build && bunx electron-builder --dir --publish never",
     "check:electron": "node ./node_modules/typescript/bin/tsc -p electron/tsconfig.json && bun test electron && bun run build:electron",
     "preview": "vite preview",
-    "tauri": "tauri",
     "test": "vitest",
     "test:ui": "vitest --ui",
     "lint": "node ./node_modules/typescript/bin/tsc --noEmit"
@@ -117,14 +116,5 @@
     "typescript": "^5.9.3",
     "vite": "^8.0.10",
     "vitest": "^3.0.4"
-  },
-  "optionalDependencies": {
-    "@tauri-apps/api": "^2.3.0",
-    "@tauri-apps/cli": "^2.3.1",
-    "@tauri-apps/plugin-dialog": "^2.2.1",
-    "@tauri-apps/plugin-notification": "^2.2.1",
-    "@tauri-apps/plugin-process": "^2.2.1",
-    "@tauri-apps/plugin-shell": "^2.2.1",
-    "@tauri-apps/plugin-updater": "^2.2.1"
   }
 }

@@ -958,8 +958,8 @@ html, body, #root {
   color: var(--color-selection-fg);
 }
 
-/* Tauri drag region */
-[data-tauri-drag-region] {
+/* Desktop drag region */
+[data-desktop-drag-region] {
   -webkit-app-region: drag;
 }
 button, input, textarea, select, a, [role="button"] {

@@ -407,7 +407,7 @@ export function TabBar() {
       {isDesktopRuntime && (
         <div
           data-testid="tab-bar-drag-gutter"
-          data-tauri-drag-region
+          data-desktop-drag-region
           aria-hidden="true"
           className={`min-h-11 flex-shrink-0 ${showWindowControls ? 'w-3' : 'w-4'}`}
         />

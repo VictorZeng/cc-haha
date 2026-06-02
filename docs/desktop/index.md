@@ -60,7 +60,7 @@
 2. 关键源码位置：
    - `desktop/src/` — React 前端
    - `desktop/electron/` — Electron main/preload/系统能力 host
-   - `desktop/src-tauri/` — 迁移期保留的 Tauri/Rust legacy host 与 sidecar 资源目录
+   - `desktop/src-tauri/` — 历史资源目录，当前仅作为 sidecar、图标和 preview agent 的 Electron 打包输入
    - `desktop/sidecars/` — Sidecar 入口
    - `src/server/` — Express API 服务端
    - `adapters/` — IM 适配器

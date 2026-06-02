@@ -17,17 +17,33 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke,
 }))
 
+function installElectronUpdateHost() {
+  window.desktopHost = {
+    ...browserHost,
+    kind: 'electron',
+    isDesktop: true,
+    capabilities: {
+      ...browserHost.capabilities,
+      updates: true,
+    },
+    updates: {
+      ...browserHost.updates,
+      check,
+      prepareInstall: () => invoke('prepare_for_update_install'),
+      cancelInstall: () => invoke('cancel_update_install'),
+      relaunch,
+    },
+  }
+}
+
 describe('updateStore', () => {
   beforeEach(() => {
     check.mockReset()
     relaunch.mockReset()
     invoke.mockReset()
     window.localStorage.clear()
-    Object.defineProperty(window, '__TAURI_INTERNALS__', {
-      configurable: true,
-      value: {},
-    })
-    Reflect.deleteProperty(window, 'desktopHost')
+    installElectronUpdateHost()
+    Reflect.deleteProperty(window, '__TAURI_INTERNALS__')
     Reflect.deleteProperty(window, '__TAURI__')
   })
 

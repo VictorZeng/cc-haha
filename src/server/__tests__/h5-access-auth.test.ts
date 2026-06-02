@@ -109,6 +109,16 @@ function spoofedLoopbackHeaders(port: string): Record<string, string> {
   }
 }
 
+function localFileUrl(base: string, absPath: string): string {
+  const normalized = absPath.replace(/\\/g, '/')
+  const rooted = normalized.startsWith('/') ? normalized : `/${normalized}`
+  const encoded = rooted
+    .split('/')
+    .map((segment) => encodeURIComponent(segment))
+    .join('/')
+  return `${base}/local-file${encoded}`
+}
+
 async function enableH5Access(options: {
   allowedOrigins?: string[]
   publicBaseUrl?: string | null
@@ -241,7 +251,7 @@ describe('remote H5 auth and CORS integration', () => {
     await expect(assetResponse.text()).resolves.toContain('window.__h5')
   })
 
-  test('finds Tauri packaged H5 resources under Resources/_up_/dist', async () => {
+  test('finds legacy packaged H5 resources under Resources/_up_/dist', async () => {
     const appRoot = path.join(tmpDir, 'Fake.app', 'Contents', 'MacOS')
     const mappedDistDir = path.join(tmpDir, 'Fake.app', 'Contents', 'Resources', '_up_', 'dist')
     delete process.env.CLAUDE_H5_DIST_DIR
@@ -279,31 +289,29 @@ describe('remote H5 auth and CORS integration', () => {
     })
   })
 
-  test('allows localhost WebUI origin without H5 token for browser development', async () => {
+  test('blocks localhost browser capability requests while H5 access is disabled', async () => {
     const response = await fetch(`${baseUrl}/api/status`, {
       headers: {
         Origin: 'http://127.0.0.1:5179',
       },
     })
 
-    expect(response.status).toBe(200)
-    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('http://127.0.0.1:5179')
+    expect(response.status).toBe(403)
     await expect(response.json()).resolves.toMatchObject({
-      status: 'ok',
+      error: 'Forbidden',
     })
   })
 
-  test('allows the Tauri desktop WebView origin to control the local sidecar without H5 token', async () => {
+  test('does not keep retired Tauri origins trusted after Electron replacement', async () => {
     const response = await fetch(`${baseUrl}/api/status`, {
       headers: {
         Origin: 'http://tauri.localhost',
       },
     })
 
-    expect(response.status).toBe(200)
-    expect(response.headers.get('Access-Control-Allow-Origin')).toBe('http://tauri.localhost')
+    expect(response.status).toBe(403)
     await expect(response.json()).resolves.toMatchObject({
-      status: 'ok',
+      error: 'Forbidden',
     })
   })
 
@@ -332,6 +340,39 @@ describe('remote H5 auth and CORS integration', () => {
       headers: makeUpgradeHeaders(PHONE_ORIGIN),
     })
     expect(wsResponse.status).toBe(403)
+  })
+
+  test('blocks remote browser local-file and preview-fs requests while H5 access is disabled', async () => {
+    const localFileResponse = await fetch(localFileUrl(baseUrl, path.join(tmpDir, 'dist', 'index.html')), {
+      headers: {
+        Origin: PHONE_ORIGIN,
+      },
+    })
+    expect(localFileResponse.status).toBe(403)
+
+    const previewResponse = await fetch(`${baseUrl}/preview-fs/h5-auth-test/index.html`, {
+      headers: {
+        Origin: PHONE_ORIGIN,
+      },
+    })
+    expect(previewResponse.status).toBe(403)
+  })
+
+  test('blocks loopback browser local-file and preview-fs requests while H5 access is disabled', async () => {
+    const loopbackBrowserOrigin = 'http://localhost:5173'
+    const localFileResponse = await fetch(localFileUrl(baseUrl, path.join(tmpDir, 'dist', 'index.html')), {
+      headers: {
+        Origin: loopbackBrowserOrigin,
+      },
+    })
+    expect(localFileResponse.status).toBe(403)
+
+    const previewResponse = await fetch(`${baseUrl}/preview-fs/h5-auth-test/index.html`, {
+      headers: {
+        Origin: loopbackBrowserOrigin,
+      },
+    })
+    expect(previewResponse.status).toBe(403)
   })
 
   test('blocks remote browser SDK requests while H5 access is disabled', async () => {
@@ -680,6 +721,75 @@ describe('remote H5 auth and CORS integration', () => {
     }
   })
 
+  test('requires H5 token for remote browser local-file and preview-fs requests when H5 access is enabled', async () => {
+    const token = await enableH5Access({
+      allowedOrigins: [PHONE_ORIGIN],
+    })
+    const localFile = localFileUrl(baseUrl, path.join(process.cwd(), 'package.json'))
+
+    const missingLocalFileToken = await fetch(localFile, {
+      headers: {
+        Origin: PHONE_ORIGIN,
+      },
+    })
+    expect(missingLocalFileToken.status).toBe(401)
+
+    const wrongLocalFileToken = await fetch(localFile, {
+      headers: {
+        Origin: PHONE_ORIGIN,
+        Authorization: 'Bearer wrong-token',
+      },
+    })
+    expect(wrongLocalFileToken.status).toBe(401)
+
+    const validLocalFileToken = await fetch(localFile, {
+      headers: {
+        Origin: PHONE_ORIGIN,
+        Authorization: `Bearer ${token}`,
+      },
+    })
+    expect(validLocalFileToken.status).toBe(200)
+    await expect(validLocalFileToken.text()).resolves.toContain('"name"')
+
+    const missingPreviewToken = await fetch(`${baseUrl}/preview-fs/h5-auth-test/index.html`, {
+      headers: {
+        Origin: PHONE_ORIGIN,
+      },
+    })
+    expect(missingPreviewToken.status).toBe(401)
+  })
+
+  test('requires H5 token for loopback browser local-file and preview-fs requests when H5 access is enabled', async () => {
+    const loopbackBrowserOrigin = 'http://localhost:5173'
+    const token = await enableH5Access({
+      allowedOrigins: [loopbackBrowserOrigin],
+    })
+    const localFile = localFileUrl(baseUrl, path.join(process.cwd(), 'package.json'))
+
+    const missingLocalFileToken = await fetch(localFile, {
+      headers: {
+        Origin: loopbackBrowserOrigin,
+      },
+    })
+    expect(missingLocalFileToken.status).toBe(401)
+
+    const validLocalFileToken = await fetch(localFile, {
+      headers: {
+        Origin: loopbackBrowserOrigin,
+        Authorization: `Bearer ${token}`,
+      },
+    })
+    expect(validLocalFileToken.status).toBe(200)
+    await expect(validLocalFileToken.text()).resolves.toContain('"name"')
+
+    const missingPreviewToken = await fetch(`${baseUrl}/preview-fs/h5-auth-test/index.html`, {
+      headers: {
+        Origin: loopbackBrowserOrigin,
+      },
+    })
+    expect(missingPreviewToken.status).toBe(401)
+  })
+
   test('does not allow the server API key to replace the H5 token for remote browser requests', async () => {
     process.env.ANTHROPIC_API_KEY = 'test-server-key'
     await enableH5Access({
@@ -750,7 +860,7 @@ describe('remote H5 auth and CORS integration', () => {
     })
   })
 
-  test('keeps Tauri loopback REST requests tokenless when H5 access is enabled', async () => {
+  test('does not keep retired Tauri loopback REST requests tokenless when H5 access is enabled', async () => {
     await enableH5Access()
 
     const response = await fetch(`${baseUrl}/api/status`, {
@@ -759,7 +869,7 @@ describe('remote H5 auth and CORS integration', () => {
       },
     })
 
-    expect(response.status).toBe(200)
+    expect(response.status).toBe(403)
   })
 
   test('keeps local loopback websocket and SDK requests tokenless when H5 access is enabled', async () => {
@@ -786,6 +896,15 @@ describe('remote H5 auth and CORS integration', () => {
 
       expect(response.status).toBe(200)
     }
+  })
+
+  test('keeps local loopback local-file navigations tokenless when H5 access is enabled', async () => {
+    await enableH5Access()
+
+    const response = await fetch(localFileUrl(baseUrl, path.join(process.cwd(), 'package.json')))
+
+    expect(response.status).toBe(200)
+    await expect(response.text()).resolves.toContain('"name"')
   })
 
   test('blocks adapter requests from non-local browser origins when H5 access is enabled', async () => {

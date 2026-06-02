@@ -3,7 +3,7 @@ import type {
   AppModeConfig as SettingsAppModeConfig,
 } from '../../types/settings'
 
-export type DesktopHostKind = 'browser' | 'tauri' | 'electron'
+export type DesktopHostKind = 'browser' | 'electron'
 
 export type DesktopHostCapability =
   | 'appMode'
@@ -228,7 +228,5 @@ export type DesktopHost = {
 declare global {
   interface Window {
     desktopHost?: DesktopHost
-    __TAURI__?: unknown
-    __TAURI_INTERNALS__?: unknown
   }
 }

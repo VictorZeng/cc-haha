@@ -61,19 +61,6 @@ vi.mock('../../api/websocket', () => ({
   },
 }))
 
-vi.mock('@tauri-apps/plugin-dialog', () => ({
-  open: mocks.dialogOpen,
-}))
-
-vi.mock('@tauri-apps/api/webview', () => ({
-  getCurrentWebview: () => ({
-    onDragDropEvent: vi.fn(async (handler: (event: { payload: unknown }) => void) => {
-      mocks.webviewDragHandlers.push(handler)
-      return mocks.webviewUnlisten
-    }),
-  }),
-}))
-
 vi.mock('../../hooks/useMobileViewport', () => ({
   useMobileViewport: () => viewportMocks.isMobile,
 }))
@@ -92,6 +79,7 @@ import { useSessionStore } from '../../stores/sessionStore'
 import { useSettingsStore } from '../../stores/settingsStore'
 import { useTabStore } from '../../stores/tabStore'
 import { useWorkspaceChatContextStore } from '../../stores/workspaceChatContextStore'
+import { browserHost } from '../../lib/desktopHost/browserHost'
 
 function okRepositoryContext() {
   return {
@@ -134,9 +122,33 @@ describe('ChatInput file mentions', () => {
   const initialTabState = useTabStore.getInitialState()
   const initialWorkspaceContextState = useWorkspaceChatContextStore.getInitialState()
 
+  const installElectronFileHost = () => {
+    window.desktopHost = {
+      ...browserHost,
+      kind: 'electron',
+      isDesktop: true,
+      capabilities: {
+        ...browserHost.capabilities,
+        dialogs: true,
+      },
+      dialogs: {
+        ...browserHost.dialogs,
+        open: mocks.dialogOpen,
+      },
+      webview: {
+        ...browserHost.webview,
+        onDragDropEvent: async (handler) => {
+          mocks.webviewDragHandlers.push(handler as (event: { payload: unknown }) => void)
+          return mocks.webviewUnlisten
+        },
+      },
+    }
+  }
+
   beforeEach(() => {
     vi.clearAllMocks()
     mocks.webviewDragHandlers.length = 0
+    Reflect.deleteProperty(window, 'desktopHost')
     delete (window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__
     viewportMocks.isMobile = false
     useSettingsStore.setState({ locale: 'en' })
@@ -785,10 +797,7 @@ describe('ChatInput file mentions', () => {
   })
 
   it('uses native desktop file paths instead of inlining selected files', async () => {
-    Object.defineProperty(window, '__TAURI_INTERNALS__', {
-      configurable: true,
-      value: {},
-    })
+    installElectronFileHost()
     mocks.dialogOpen.mockResolvedValueOnce([
       '/Users/nanmi/tmp/large-a.log',
       'C:\\Users\\Nanmi\\Desktop\\large-b.zip',
@@ -832,10 +841,7 @@ describe('ChatInput file mentions', () => {
   })
 
   it('accepts native desktop file drops on the active session composer as path-only attachments', async () => {
-    Object.defineProperty(window, '__TAURI_INTERNALS__', {
-      configurable: true,
-      value: {},
-    })
+    installElectronFileHost()
 
     render(<ChatInput compact />)
 

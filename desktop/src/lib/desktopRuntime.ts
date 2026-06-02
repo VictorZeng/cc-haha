@@ -6,7 +6,7 @@ import {
   setAuthToken,
   setBaseUrl,
 } from '../api/client'
-import { detectDesktopHostEnvironment, getDesktopHost } from './desktopHost'
+import { getDesktopHost } from './desktopHost'
 
 export const H5_SERVER_URL_STORAGE_KEY = 'cc-haha-h5-server-url'
 export const H5_TOKEN_STORAGE_KEY = 'cc-haha-h5-token'
@@ -32,11 +32,6 @@ export class H5ConnectionRequiredError extends Error {
     this.serverUrl = serverUrl
     this.reason = reason
   }
-}
-
-export function isTauriRuntime() {
-  if (typeof window === 'undefined') return false
-  return detectDesktopHostEnvironment().hasTauri
 }
 
 function getDetectedDesktopHost() {
