@@ -807,6 +807,49 @@ describe('chatStore history mapping', () => {
     })
   })
 
+  it('restores token usage from transcript history after reopening a session', async () => {
+    vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
+      messages: [
+        {
+          id: 'user-1',
+          type: 'user',
+          timestamp: '2026-04-06T00:00:00.000Z',
+          content: 'build the docs',
+        },
+        {
+          id: 'assistant-1',
+          type: 'assistant',
+          timestamp: '2026-04-06T00:00:01.000Z',
+          content: 'done',
+          usage: { input_tokens: 1200, output_tokens: 80 },
+        },
+        {
+          id: 'assistant-2',
+          type: 'assistant',
+          timestamp: '2026-04-06T00:00:02.000Z',
+          content: [{ type: 'text', text: 'follow-up done' }],
+          usage: { input_tokens: 3400, output_tokens: 120 },
+        },
+      ],
+    })
+
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          messages: [],
+          tokenUsage: { input_tokens: 0, output_tokens: 0 },
+        }),
+      },
+    })
+
+    await useChatStore.getState().loadHistory(TEST_SESSION_ID)
+
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.tokenUsage).toEqual({
+      input_tokens: 4600,
+      output_tokens: 200,
+    })
+  })
+
   it('uses transcript terminal events to repair stale live goal and background task state', async () => {
     vi.mocked(sessionsApi.getMessages).mockResolvedValueOnce({
       messages: [
@@ -2952,6 +2995,40 @@ describe('chatStore history mapping', () => {
     ])
     expect(session?.messages.some((message) => message.type === 'compact_summary' && message.phase === 'compacting')).toBe(false)
     expect(updateTabStatusMock).toHaveBeenLastCalledWith(TEST_SESSION_ID, 'running')
+  })
+
+  it('starts an elapsed timer when a reconnected session reports running status', () => {
+    vi.useFakeTimers()
+
+    useChatStore.setState({
+      sessions: {
+        [TEST_SESSION_ID]: makeSession({
+          chatState: 'idle',
+          elapsedSeconds: 0,
+          elapsedTimer: null,
+        }),
+      },
+    })
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'status',
+      state: 'thinking',
+      verb: 'Thinking',
+    })
+
+    vi.advanceTimersByTime(2100)
+
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.elapsedSeconds).toBe(2)
+
+    useChatStore.getState().handleServerMessage(TEST_SESSION_ID, {
+      type: 'status',
+      state: 'idle',
+    })
+
+    expect(useChatStore.getState().sessions[TEST_SESSION_ID]?.elapsedTimer).toBeNull()
+
+    vi.runOnlyPendingTimers()
+    vi.useRealTimers()
   })
 
   it('tracks API retry status until the request finishes', () => {

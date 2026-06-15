@@ -94,6 +94,13 @@ export type TrimSessionResult = {
   removedMessageIds: string[]
 }
 
+export type MessageUsage = {
+  input_tokens?: number
+  output_tokens?: number
+  cache_read_input_tokens?: number
+  cache_creation_input_tokens?: number
+}
+
 export type MessageEntry = {
   id: string
   type: 'user' | 'assistant' | 'system' | 'tool_use' | 'tool_result'
@@ -101,6 +108,7 @@ export type MessageEntry = {
   toolUseResult?: unknown
   timestamp: string
   model?: string
+  usage?: MessageUsage
   parentUuid?: string
   parentToolUseId?: string
   isSidechain?: boolean
@@ -223,6 +231,34 @@ type RawEntry = {
   worktreeSession?: PersistedWorktreeSession | null
   title?: string
   [key: string]: unknown
+}
+
+type RawMessageUsage = NonNullable<RawEntry['message']>['usage']
+
+function normalizeMessageUsage(usage: RawMessageUsage): MessageUsage | undefined {
+  if (!usage) return undefined
+
+  const normalized: MessageUsage = {}
+  if (typeof usage.input_tokens === 'number' && Number.isFinite(usage.input_tokens)) {
+    normalized.input_tokens = usage.input_tokens
+  }
+  if (typeof usage.output_tokens === 'number' && Number.isFinite(usage.output_tokens)) {
+    normalized.output_tokens = usage.output_tokens
+  }
+  if (
+    typeof usage.cache_read_input_tokens === 'number' &&
+    Number.isFinite(usage.cache_read_input_tokens)
+  ) {
+    normalized.cache_read_input_tokens = usage.cache_read_input_tokens
+  }
+  if (
+    typeof usage.cache_creation_input_tokens === 'number' &&
+    Number.isFinite(usage.cache_creation_input_tokens)
+  ) {
+    normalized.cache_creation_input_tokens = usage.cache_creation_input_tokens
+  }
+
+  return Object.keys(normalized).length > 0 ? normalized : undefined
 }
 
 type PersistedWorktreeSession = {
@@ -700,6 +736,8 @@ export class SessionService {
       type = 'system'
     }
 
+    const usage = normalizeMessageUsage(msg.usage)
+
     return {
       id: entry.uuid || crypto.randomUUID(),
       type,
@@ -707,6 +745,7 @@ export class SessionService {
       ...(entry.toolUseResult !== undefined ? { toolUseResult: entry.toolUseResult } : {}),
       timestamp: entry.timestamp || new Date().toISOString(),
       model: msg.model,
+      ...(usage ? { usage } : {}),
       parentUuid: entry.parentUuid ?? undefined,
       parentToolUseId,
       isSidechain: entry.isSidechain,

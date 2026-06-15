@@ -840,6 +840,37 @@ function mergeSlashCommandUpdates(
   return [...merged.values()]
 }
 
+function readUsageToken(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function summarizeTokenUsageFromHistory(messages: MessageEntry[]): TokenUsage | null {
+  let inputTokens = 0
+  let outputTokens = 0
+  let cacheReadTokens = 0
+  let cacheCreationTokens = 0
+
+  for (const message of messages) {
+    const usage = message.usage
+    if (!usage) continue
+    inputTokens += readUsageToken(usage.input_tokens)
+    outputTokens += readUsageToken(usage.output_tokens)
+    cacheReadTokens += readUsageToken(usage.cache_read_input_tokens)
+    cacheCreationTokens += readUsageToken(usage.cache_creation_input_tokens)
+  }
+
+  if (inputTokens === 0 && outputTokens === 0 && cacheReadTokens === 0 && cacheCreationTokens === 0) {
+    return null
+  }
+
+  return {
+    input_tokens: inputTokens,
+    output_tokens: outputTokens,
+    ...(cacheReadTokens > 0 ? { cache_read_tokens: cacheReadTokens } : {}),
+    ...(cacheCreationTokens > 0 ? { cache_creation_tokens: cacheCreationTokens } : {}),
+  }
+}
+
 async function fetchAndMapSessionHistory(sessionId: string) {
   const { messages, taskNotifications } = await sessionsApi.getMessages(sessionId)
   const uiMessages = mapHistoryMessagesToUiMessages(messages)
@@ -855,6 +886,7 @@ async function fetchAndMapSessionHistory(sessionId: string) {
     restoredBackgroundTasks: backgroundTaskRecordFromNotifications(Object.values(restoredNotifications)),
     lastTodos: extractLastTodoWriteFromHistory(messages),
     hasMessagesAfterTaskCompletion: hasUserMessagesAfterTaskCompletion(messages),
+    tokenUsage: summarizeTokenUsageFromHistory(messages),
   }
 }
 
@@ -1162,6 +1194,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
           restoredBackgroundTasks,
           lastTodos,
           hasMessagesAfterTaskCompletion,
+          tokenUsage,
         } = await fetchAndMapSessionHistory(sessionId)
         set((state) => {
           const session = state.sessions[sessionId]
@@ -1176,6 +1209,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
                 s.backgroundAgentTasks ?? {},
                 restoredBackgroundTasks,
               ),
+              tokenUsage: tokenUsage ?? s.tokenUsage,
               messages: mergeRestoredHistoryIntoLiveMessages(
                 mergeBackgroundTaskMessages(s.messages, restoredBackgroundTasks),
                 uiMessages,
@@ -1192,6 +1226,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
               s.backgroundAgentTasks ?? {},
               restoredBackgroundTasks,
             ),
+            tokenUsage: tokenUsage ?? s.tokenUsage,
           })) }
         })
         if (lastTodos && lastTodos.length > 0) {
@@ -1235,6 +1270,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
         restoredBackgroundTasks,
         lastTodos,
         hasMessagesAfterTaskCompletion,
+        tokenUsage,
       } = await fetchAndMapSessionHistory(sessionId)
 
       set((state) => {
@@ -1249,6 +1285,7 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             activeGoal,
             agentTaskNotifications: restoredNotifications,
             backgroundAgentTasks: restoredBackgroundTasks,
+            tokenUsage: tokenUsage ?? session.tokenUsage,
             chatState: 'idle',
             activeThinkingId: null,
             activeToolUseId: null,
@@ -1500,6 +1537,19 @@ export const useChatStore = create<ChatStore>((set, get) => ({
             } : pendingText !== session.streamingText ? { streamingText: pendingText } : {}),
           }
         })
+        if (msg.state !== 'idle') {
+          const session = get().sessions[sessionId]
+          if (session && !session.elapsedTimer) {
+            const timer = setInterval(() => {
+              set((st) => ({
+                sessions: updateSessionIn(st.sessions, sessionId, (sess) => ({
+                  elapsedSeconds: sess.elapsedSeconds + 1,
+                })),
+              }))
+            }, 1000)
+            update(() => ({ elapsedTimer: timer }))
+          }
+        }
         if (msg.state === 'idle') {
           const session = get().sessions[sessionId]
           if (session?.elapsedTimer) {
