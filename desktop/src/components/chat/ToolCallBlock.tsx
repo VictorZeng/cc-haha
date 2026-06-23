@@ -249,6 +249,12 @@ function PlanToolCallBlock({
 }) {
   const t = useTranslation()
   const preview = extractPlanPreview(input, result?.content)
+  const hasPlanPreview = Boolean(
+    preview.plan.trim() ||
+    preview.filePath ||
+    preview.allowedPrompts.length > 0,
+  )
+  const showPlanPreview = hasPlanPreview || !result?.isError
   const title = result?.isError
     ? t('permission.planRejected')
     : result
@@ -287,14 +293,16 @@ function PlanToolCallBlock({
 
       {expanded ? (
         <div className="space-y-2.5 border-t border-[var(--color-border)]/60 px-3 py-3">
-          <PlanPreviewCard
-            title={t('permission.planPreviewTitle')}
-            plan={preview.plan}
-            filePath={preview.filePath}
-            allowedPrompts={preview.allowedPrompts}
-            requestedPermissionsTitle={t('permission.planRequestedPermissions')}
-            emptyLabel={t('permission.planEmpty')}
-          />
+          {showPlanPreview ? (
+            <PlanPreviewCard
+              title={t('permission.planPreviewTitle')}
+              plan={preview.plan}
+              filePath={preview.filePath}
+              allowedPrompts={preview.allowedPrompts}
+              requestedPermissionsTitle={t('permission.planRequestedPermissions')}
+              emptyLabel={t('permission.planEmpty')}
+            />
+          ) : null}
           {result?.isError && hasRawResult ? (
             renderResultOutput(result, extractTextContent(result.content) ?? '', t)
           ) : null}

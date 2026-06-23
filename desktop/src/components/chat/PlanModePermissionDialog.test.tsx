@@ -189,6 +189,24 @@ describe('plan mode permission UI', () => {
     expect(container.textContent).not.toContain('Tool Output')
   })
 
+  it('does not render an empty plan preview for interrupted ExitPlanMode results', () => {
+    const { container } = render(
+      <ToolCallBlock
+        toolName="ExitPlanMode"
+        input={{}}
+        result={{
+          isError: true,
+          content: 'Tool permission request failed: AbortError',
+        }}
+      />,
+    )
+
+    expect(container.textContent).toContain('Plan rejected')
+    expect(container.textContent).toContain('Tool permission request failed: AbortError')
+    expect(container.textContent).not.toContain("Claude's plan")
+    expect(container.textContent).not.toContain('No plan content available.')
+  })
+
   it('renders EnterPlanMode as a compact status instead of raw model instructions', () => {
     const { container } = render(
       <ToolCallBlock
