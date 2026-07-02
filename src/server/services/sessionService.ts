@@ -40,7 +40,9 @@ import {
 import { registerFilesystemAccessRoot } from './filesystemAccessRoots.js'
 import { normalizeDriveRootPathForPlatform } from './windowsDrivePath.js'
 import { cleanSessionTitleSource } from '../../utils/sessionTitleText.js'
-import { roughTokenCountEstimationForMessages } from '../../services/tokenEstimation.js'
+import {
+  roughTokenCountEstimationForMessage,
+} from '../../services/tokenEstimation.js'
 import { ProviderService } from './providerService.js'
 
 // ============================================================================
@@ -87,6 +89,13 @@ export type SessionLaunchInfo = {
   runtimeProviderId?: string | null
   runtimeModelId?: string
   effortLevel?: string
+}
+
+export type SessionInspectionTranscriptSnapshot = {
+  launchInfo: SessionLaunchInfo
+  metadata: TranscriptMetadataSnapshot
+  usage: TranscriptUsageSnapshot | null
+  contextEstimate: TranscriptContextEstimate | null
 }
 
 export type TrimSessionResult = {
@@ -424,6 +433,36 @@ export class SessionService {
       }
     }
     return entries
+  }
+
+  private async streamJsonlFile(
+    filePath: string,
+    onEntry: (entry: RawEntry) => void,
+  ): Promise<void> {
+    const stream = createReadStream(filePath, { encoding: 'utf8' })
+    const lines = createInterface({
+      input: stream,
+      crlfDelay: Infinity,
+    })
+
+    try {
+      for await (const line of lines) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        try {
+          onEntry(JSON.parse(trimmed) as RawEntry)
+        } catch {
+          // skip malformed lines
+        }
+      }
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw err
+      }
+    } finally {
+      lines.close()
+      stream.destroy()
+    }
   }
 
   private async scanSessionListSummary(
@@ -1401,8 +1440,9 @@ export class SessionService {
   private async getProviderContextWindowForSession(
     sessionId: string,
     model: string,
+    launchInfoOverride?: Pick<SessionLaunchInfo, 'runtimeProviderId'> | null,
   ): Promise<number | undefined> {
-    const launchInfo = await this.getSessionLaunchInfo(sessionId).catch(() => null)
+    const launchInfo = launchInfoOverride ?? await this.getSessionLaunchInfo(sessionId).catch(() => null)
     const providerIds: string[] = []
     const allowSavedProviderInference = launchInfo?.runtimeProviderId === undefined
 
@@ -1528,8 +1568,16 @@ export class SessionService {
     return contextWindow
   }
 
-  private async getTranscriptContextWindow(sessionId: string, model: string): Promise<number> {
-    const providerContextWindow = await this.getProviderContextWindowForSession(sessionId, model)
+  private async getTranscriptContextWindow(
+    sessionId: string,
+    model: string,
+    launchInfo?: Pick<SessionLaunchInfo, 'runtimeProviderId'> | null,
+  ): Promise<number> {
+    const providerContextWindow = await this.getProviderContextWindowForSession(
+      sessionId,
+      model,
+      launchInfo,
+    )
     if (providerContextWindow !== undefined) {
       return providerContextWindow
     }
@@ -1571,49 +1619,22 @@ export class SessionService {
     return metadata
   }
 
-  async getTranscriptContextEstimate(sessionId: string): Promise<TranscriptContextEstimate | null> {
-    const found = await this.findSessionFile(sessionId)
-    if (!found) return null
-
-    const entries = await this.readJsonlFile(found.filePath)
-    let latest: {
+  private async buildTranscriptContextEstimate(
+    sessionId: string,
+    latest: {
       model: string
       inputTokens: number
       outputTokens: number
       cacheReadInputTokens: number
       cacheCreationInputTokens: number
-    } | null = null
-
-    for (const entry of entries) {
-      const usage = entry.message?.usage
-      const model = entry.message?.model
-      if (!usage || typeof model !== 'string') continue
-
-      const inputTokens = typeof usage.input_tokens === 'number' ? usage.input_tokens : 0
-      const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0
-      const cacheReadInputTokens = typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0
-      const cacheCreationInputTokens = typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0
-      const promptTokens = inputTokens + cacheReadInputTokens + cacheCreationInputTokens
-      if (promptTokens === 0 && outputTokens === 0) continue
-
-      latest = {
-        model,
-        inputTokens,
-        outputTokens,
-        cacheReadInputTokens,
-        cacheCreationInputTokens,
-      }
-    }
-
-    if (!latest) return null
-
-    const rawMaxTokens = await this.getTranscriptContextWindow(sessionId, latest.model)
+    },
+    estimatedTokensFromMessages: number,
+    transcriptHasMediaInput: boolean,
+    launchInfo?: Pick<SessionLaunchInfo, 'runtimeProviderId'> | null,
+  ): Promise<TranscriptContextEstimate> {
+    const rawMaxTokens = await this.getTranscriptContextWindow(sessionId, latest.model, launchInfo)
     const promptTokens = latest.inputTokens + latest.cacheReadInputTokens + latest.cacheCreationInputTokens
-    const transcriptMessages = entries.filter(entry =>
-      entry.type === 'user' || entry.type === 'assistant' || entry.type === 'attachment',
-    ) as Parameters<typeof roughTokenCountEstimationForMessages>[0]
-    const estimatedTokens =
-      roughTokenCountEstimationForMessages(transcriptMessages) || promptTokens
+    const estimatedTokens = estimatedTokensFromMessages || promptTokens
     const contextBudget = calculateContextBudget({
       estimatedTokens,
       contextWindow: rawMaxTokens,
@@ -1626,7 +1647,7 @@ export class SessionService {
       usageTrust: getProviderUsageTrust({
         isFirstPartyAnthropic: isFirstPartyAnthropicBaseUrl(),
       }),
-      hasMediaInput: hasMediaInput(transcriptMessages),
+      hasMediaInput: transcriptHasMediaInput,
     })
     const totalTokens = contextBudget.usedTokens
     const percentage = rawMaxTokens > 0 ? Math.round((totalTokens / rawMaxTokens) * 100) : 0
@@ -1679,6 +1700,63 @@ export class SessionService {
         cache_read_input_tokens: latest.cacheReadInputTokens,
       },
     }
+  }
+
+  async getTranscriptContextEstimate(sessionId: string): Promise<TranscriptContextEstimate | null> {
+    const found = await this.findSessionFile(sessionId)
+    if (!found) return null
+
+    const entries = await this.readJsonlFile(found.filePath)
+    let latest: {
+      model: string
+      inputTokens: number
+      outputTokens: number
+      cacheReadInputTokens: number
+      cacheCreationInputTokens: number
+    } | null = null
+    let estimatedTokensFromMessages = 0
+    let transcriptHasMediaInput = false
+
+    for (const entry of entries) {
+      if (
+        entry.type === 'user' ||
+        entry.type === 'assistant' ||
+        entry.type === 'attachment'
+      ) {
+        estimatedTokensFromMessages += roughTokenCountEstimationForMessage(entry)
+        if (!transcriptHasMediaInput && hasMediaInput([entry])) {
+          transcriptHasMediaInput = true
+        }
+      }
+
+      const usage = entry.message?.usage
+      const model = entry.message?.model
+      if (!usage || typeof model !== 'string') continue
+
+      const inputTokens = typeof usage.input_tokens === 'number' ? usage.input_tokens : 0
+      const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0
+      const cacheReadInputTokens = typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0
+      const cacheCreationInputTokens = typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0
+      const promptTokens = inputTokens + cacheReadInputTokens + cacheCreationInputTokens
+      if (promptTokens === 0 && outputTokens === 0) continue
+
+      latest = {
+        model,
+        inputTokens,
+        outputTokens,
+        cacheReadInputTokens,
+        cacheCreationInputTokens,
+      }
+    }
+
+    if (!latest) return null
+
+    return await this.buildTranscriptContextEstimate(
+      sessionId,
+      latest,
+      estimatedTokensFromMessages,
+      transcriptHasMediaInput,
+    )
   }
 
   async getTranscriptUsage(sessionId: string): Promise<TranscriptUsageSnapshot | null> {
@@ -1797,6 +1875,273 @@ export class SessionService {
       totalCacheCreationInputTokens,
       totalWebSearchRequests,
       models: Array.from(models.values()),
+    }
+  }
+
+  async getInspectionTranscriptSnapshot(sessionId: string): Promise<SessionInspectionTranscriptSnapshot | null> {
+    const found = await this.findSessionFile(sessionId)
+    if (!found) return null
+
+    let latestWorkDir: string | null = null
+    let latestCwd: string | null = null
+    let repository: PreparedSessionWorkspace['repository'] | undefined
+    let worktreeSession: PersistedWorktreeSession | null | undefined
+    let permissionMode: string | undefined
+    let runtimeProviderId: string | null | undefined
+    let runtimeModelId: string | undefined
+    let effortLevel: string | undefined
+    let customTitle: string | null = null
+    let transcriptMessageCount = 0
+    const metadata: TranscriptMetadataSnapshot = {}
+
+    const models = new Map<string, TranscriptUsageSnapshot['models'][number]>()
+    let totalCostUSD = 0
+    let totalInputTokens = 0
+    let totalOutputTokens = 0
+    let totalCacheReadInputTokens = 0
+    let totalCacheCreationInputTokens = 0
+    let totalWebSearchRequests = 0
+    let hasUnknownModelCost = false
+    let firstUsageAt: number | null = null
+    let lastUsageAt: number | null = null
+
+    let latestContextUsage: {
+      model: string
+      inputTokens: number
+      outputTokens: number
+      cacheReadInputTokens: number
+      cacheCreationInputTokens: number
+    } | null = null
+    let estimatedTokensFromMessages = 0
+    let transcriptHasMediaInput = false
+
+    await this.streamJsonlFile(found.filePath, (entry) => {
+      if (typeof entry.message?.model === 'string') {
+        metadata.model = entry.message.model
+      }
+      if (typeof entry.cwd === 'string') {
+        metadata.cwd = entry.cwd
+        latestCwd = normalizeDriveRootPathForPlatform(entry.cwd)
+      }
+      if (typeof entry.version === 'string') {
+        metadata.version = entry.version
+      }
+
+      if (entry.type === 'session-meta') {
+        const record = entry as Record<string, unknown>
+        if (typeof record.workDir === 'string') {
+          latestWorkDir = normalizeDriveRootPathForPlatform(record.workDir)
+        }
+        if (
+          typeof entry.permissionMode === 'string' &&
+          VALID_SESSION_PERMISSION_MODES.has(entry.permissionMode)
+        ) {
+          permissionMode = entry.permissionMode
+        }
+        if (record.runtimeProviderId === null || typeof record.runtimeProviderId === 'string') {
+          runtimeProviderId = record.runtimeProviderId as string | null
+        }
+        if (typeof record.runtimeModelId === 'string') {
+          runtimeModelId = record.runtimeModelId
+        }
+        if (
+          typeof record.effortLevel === 'string' &&
+          VALID_SESSION_EFFORT_LEVELS.has(record.effortLevel)
+        ) {
+          effortLevel = record.effortLevel
+        }
+      }
+
+      const candidateRepository = (entry as Record<string, unknown>)?.repository
+      if (candidateRepository && typeof candidateRepository === 'object') {
+        repository = candidateRepository as PreparedSessionWorkspace['repository']
+      }
+
+      if (entry.type === 'worktree-state') {
+        if (entry.worktreeSession === null) {
+          worktreeSession = null
+        } else if (
+          entry.worktreeSession &&
+          typeof entry.worktreeSession === 'object' &&
+          typeof entry.worktreeSession.worktreePath === 'string' &&
+          typeof entry.worktreeSession.worktreeName === 'string'
+        ) {
+          worktreeSession = entry.worktreeSession
+        }
+      }
+
+      if (entry.type === 'custom-title' && typeof entry.customTitle === 'string') {
+        customTitle = entry.customTitle
+      }
+
+      if (
+        !entry.isMeta &&
+        !!entry.message?.role &&
+        (entry.type === 'user' || entry.type === 'assistant' || entry.type === 'system')
+      ) {
+        transcriptMessageCount += 1
+      }
+
+      if (
+        entry.type === 'user' ||
+        entry.type === 'assistant' ||
+        entry.type === 'attachment'
+      ) {
+        estimatedTokensFromMessages += roughTokenCountEstimationForMessage(entry)
+        if (!transcriptHasMediaInput && hasMediaInput([entry])) {
+          transcriptHasMediaInput = true
+        }
+      }
+
+      const usage = entry.message?.usage
+      const model = entry.message?.model
+      if (!usage || typeof model !== 'string') return
+
+      const inputTokens = typeof usage.input_tokens === 'number' ? usage.input_tokens : 0
+      const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0
+      const cacheReadInputTokens = typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0
+      const cacheCreationInputTokens = typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0
+      const webSearchRequests = typeof usage.server_tool_use?.web_search_requests === 'number'
+        ? usage.server_tool_use.web_search_requests
+        : 0
+      const promptTokens = inputTokens + cacheReadInputTokens + cacheCreationInputTokens
+
+      if (promptTokens !== 0 || outputTokens !== 0) {
+        latestContextUsage = {
+          model,
+          inputTokens,
+          outputTokens,
+          cacheReadInputTokens,
+          cacheCreationInputTokens,
+        }
+      }
+
+      if (
+        inputTokens === 0 &&
+        outputTokens === 0 &&
+        cacheReadInputTokens === 0 &&
+        cacheCreationInputTokens === 0 &&
+        webSearchRequests === 0
+      ) {
+        return
+      }
+
+      const canonical = getCanonicalName(model)
+      if (!Object.prototype.hasOwnProperty.call(MODEL_COSTS, canonical)) {
+        hasUnknownModelCost = true
+      }
+
+      const costUsage = {
+        input_tokens: inputTokens,
+        output_tokens: outputTokens,
+        cache_read_input_tokens: cacheReadInputTokens,
+        cache_creation_input_tokens: cacheCreationInputTokens,
+        server_tool_use: { web_search_requests: webSearchRequests },
+        speed: usage.speed,
+      } as Parameters<typeof calculateUSDCost>[1]
+      const costUSD = calculateUSDCost(model, costUsage)
+
+      let modelUsage = models.get(model)
+      if (!modelUsage) {
+        modelUsage = {
+          model,
+          displayName: canonical,
+          inputTokens: 0,
+          outputTokens: 0,
+          cacheReadInputTokens: 0,
+          cacheCreationInputTokens: 0,
+          webSearchRequests: 0,
+          costUSD: 0,
+          costDisplay: '$0.0000',
+          contextWindow: 0,
+          maxOutputTokens: getModelMaxOutputTokens(model).default,
+        }
+        models.set(model, modelUsage)
+      }
+
+      modelUsage.inputTokens += inputTokens
+      modelUsage.outputTokens += outputTokens
+      modelUsage.cacheReadInputTokens += cacheReadInputTokens
+      modelUsage.cacheCreationInputTokens += cacheCreationInputTokens
+      modelUsage.webSearchRequests += webSearchRequests
+      modelUsage.costUSD += costUSD
+      modelUsage.costDisplay = this.formatCost(modelUsage.costUSD)
+
+      totalCostUSD += costUSD
+      totalInputTokens += inputTokens
+      totalOutputTokens += outputTokens
+      totalCacheReadInputTokens += cacheReadInputTokens
+      totalCacheCreationInputTokens += cacheCreationInputTokens
+      totalWebSearchRequests += webSearchRequests
+
+      if (entry.timestamp) {
+        const time = Date.parse(entry.timestamp)
+        if (!Number.isNaN(time)) {
+          firstUsageAt = firstUsageAt === null ? time : Math.min(firstUsageAt, time)
+          lastUsageAt = lastUsageAt === null ? time : Math.max(lastUsageAt, time)
+        }
+      }
+    })
+
+    const workDir = latestWorkDir || latestCwd || this.desanitizePath(found.projectDir) || process.cwd()
+    const launchInfo: SessionLaunchInfo = {
+      filePath: found.filePath,
+      projectDir: found.projectDir,
+      workDir,
+      repository,
+      worktreeSession,
+      transcriptMessageCount,
+      customTitle,
+      permissionMode,
+      ...(runtimeProviderId !== undefined ? { runtimeProviderId } : {}),
+      ...(runtimeModelId ? { runtimeModelId } : {}),
+      ...(effortLevel ? { effortLevel } : {}),
+    }
+
+    for (const modelUsage of models.values()) {
+      modelUsage.contextWindow = await this.getTranscriptContextWindow(
+        sessionId,
+        modelUsage.model,
+        launchInfo,
+      )
+    }
+
+    const usage = models.size === 0
+      ? null
+      : {
+          source: 'transcript' as const,
+          totalCostUSD,
+          costDisplay: this.formatCost(totalCostUSD),
+          hasUnknownModelCost,
+          totalAPIDuration: 0,
+          totalDuration:
+            firstUsageAt !== null && lastUsageAt !== null
+              ? Math.max(0, Math.round((lastUsageAt - firstUsageAt) / 1000))
+              : 0,
+          totalLinesAdded: 0,
+          totalLinesRemoved: 0,
+          totalInputTokens,
+          totalOutputTokens,
+          totalCacheReadInputTokens,
+          totalCacheCreationInputTokens,
+          totalWebSearchRequests,
+          models: Array.from(models.values()),
+        }
+    const contextEstimate = latestContextUsage
+      ? await this.buildTranscriptContextEstimate(
+          sessionId,
+          latestContextUsage,
+          estimatedTokensFromMessages,
+          transcriptHasMediaInput,
+          launchInfo,
+        )
+      : null
+
+    return {
+      launchInfo,
+      metadata,
+      usage,
+      contextEstimate,
     }
   }
 

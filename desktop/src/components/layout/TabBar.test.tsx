@@ -17,6 +17,9 @@ const deleteSessionMock = vi.hoisted(() => vi.fn())
 const openProjectMenuMock = vi.hoisted(() => ({
   paths: [] as Array<string | null | undefined>,
 }))
+const sessionsApiMock = vi.hoisted(() => ({
+  delete: vi.fn(() => Promise.resolve()),
+}))
 
 function makeChatSession(chatState: ChatState): PerSessionState {
   return {
@@ -96,6 +99,10 @@ vi.mock('../../i18n', () => ({
   },
 }))
 
+vi.mock('../../api/sessions', () => ({
+  sessionsApi: sessionsApiMock,
+}))
+
 vi.mock('./OpenProjectMenu', () => ({
   OpenProjectMenu: ({ path }: { path: string | null | undefined }) => {
     if (!path) return null
@@ -157,6 +164,8 @@ describe('TabBar', () => {
     deleteSessionMock.mockReset()
     deleteSessionMock.mockResolvedValue(undefined)
     openProjectMenuMock.paths = []
+    sessionsApiMock.delete.mockClear()
+    sessionsApiMock.delete.mockResolvedValue(undefined)
     windowControlsMock.show = true
     vi.resetModules()
   })

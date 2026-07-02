@@ -410,6 +410,15 @@ describe('TraceSession', () => {
     expect(detail.getByRole('heading', { level: 2, name: 'claude-sonnet-4-5' })).toBeInTheDocument()
   })
 
+  it('does not refetch full messages for identical trace polls', async () => {
+    vi.mocked(sessionsApi.getTrace).mockResolvedValue(baseTrace)
+
+    await renderReady(20)
+
+    await waitFor(() => expect(vi.mocked(sessionsApi.getTrace).mock.calls.length).toBeGreaterThanOrEqual(3))
+    expect(sessionsApi.getMessages).toHaveBeenCalledTimes(1)
+  })
+
   it('applies poll updates when a call changes without changing row counts', async () => {
     const pendingTrace: TraceSessionData = {
       ...baseTrace,

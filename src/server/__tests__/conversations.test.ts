@@ -5,7 +5,7 @@
  * WebSocket 集成测试验证消息从客户端经过服务端到达 CLI 的完整流转。
  */
 
-import { describe, it, expect, beforeAll, afterAll } from 'bun:test'
+import { describe, it, expect, beforeAll, afterAll, spyOn } from 'bun:test'
 import * as fs from 'fs/promises'
 import * as path from 'path'
 import * as os from 'os'
@@ -1710,6 +1710,28 @@ describe('WebSocket Chat Integration', () => {
       expect(body.usage).toBeUndefined()
       expect(elapsedMs).toBeLessThan(1_500)
     })
+  })
+
+  it('should avoid transcript scans for active context-only inspection', async () => {
+    const usageSpy = spyOn(sessionService, 'getTranscriptUsage')
+    const estimateSpy = spyOn(sessionService, 'getTranscriptContextEstimate')
+    try {
+      const sessionId = `chat-context-only-fast-${crypto.randomUUID()}`
+      await runTurn(sessionId, 'hello before fast context-only inspection')
+
+      const res = await fetch(`${baseUrl}/api/sessions/${sessionId}/inspection?includeContext=1&contextOnly=1`)
+      expect(res.status).toBe(200)
+      const body = await res.json() as any
+
+      expect(body.context.model).toBe('mock-opus')
+      expect(body.contextEstimate).toBeUndefined()
+      expect(body.usage).toBeUndefined()
+      expect(usageSpy).not.toHaveBeenCalled()
+      expect(estimateSpy).not.toHaveBeenCalled()
+    } finally {
+      usageSpy.mockRestore()
+      estimateSpy.mockRestore()
+    }
   })
 
   it('should return initial context for a prewarmed empty session on the first inspection request', async () => {

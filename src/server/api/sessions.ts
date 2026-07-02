@@ -267,22 +267,37 @@ async function getSessionMessages(sessionId: string): Promise<Response> {
 }
 
 async function getSessionTrace(sessionId: string): Promise<Response> {
-  const [trace, session] = await Promise.all([
+  const [trace, sessionMeta] = await Promise.all([
     traceCaptureService.getSessionTrace(sessionId),
-    sessionService.getSession(sessionId).catch(() => null),
+    getSessionTraceMeta(sessionId),
   ])
   return Response.json({
     ...trace,
     calls: trace.calls.map((call) => trimTraceCallPreviews(call)),
-    session: session
+    session: sessionMeta
       ? {
-          id: session.id,
-          title: session.title,
-          projectPath: session.projectPath,
-          workDir: session.workDir,
+          id: sessionId,
+          title: sessionMeta.title,
+          projectPath: sessionMeta.projectPath,
+          workDir: sessionMeta.workDir,
         }
       : null,
   })
+}
+
+async function getSessionTraceMeta(sessionId: string): Promise<{
+  title: string
+  projectPath: string
+  workDir: string | null
+} | null> {
+  const found = await sessionService.findSessionFile(sessionId)
+  if (!found) return null
+  const meta = await sessionService.getSessionTitleAndMeta(found.filePath)
+  return {
+    title: meta.title,
+    projectPath: meta.projectPath,
+    workDir: meta.workDir,
+  }
 }
 
 async function getSessionTraceCall(sessionId: string, callId: string | undefined): Promise<Response> {
@@ -541,16 +556,23 @@ async function getSessionSlashCommands(sessionId: string): Promise<Response> {
 async function getSessionInspection(sessionId: string, url: URL): Promise<Response> {
   const includeContext = url.searchParams.get('includeContext') !== '0'
   const contextOnly = includeContext && url.searchParams.get('contextOnly') === '1'
+  let transcriptSnapshot: Awaited<ReturnType<typeof sessionService.getInspectionTranscriptSnapshot>> | undefined
+  const getTranscriptSnapshot = async () => {
+    if (transcriptSnapshot !== undefined) return transcriptSnapshot
+    transcriptSnapshot = await sessionService.getInspectionTranscriptSnapshot(sessionId).catch(() => null)
+    return transcriptSnapshot
+  }
+
+  const active = conversationService.hasSession(sessionId)
   const workDir =
     conversationService.getSessionWorkDir(sessionId) ||
-    await sessionService.getSessionWorkDir(sessionId)
+    (await getTranscriptSnapshot())?.launchInfo.workDir
 
   if (!workDir) {
     throw ApiError.notFound(`Session not found: ${sessionId}`)
   }
 
-  const active = conversationService.hasSession(sessionId)
-  const launchInfo = await sessionService.getSessionLaunchInfo(sessionId).catch(() => null)
+  const launchInfo = !active ? (await getTranscriptSnapshot())?.launchInfo ?? null : null
   const permissionMode = active
     ? conversationService.getSessionPermissionMode(sessionId)
     : launchInfo?.permissionMode ?? 'default'
@@ -558,7 +580,9 @@ async function getSessionInspection(sessionId: string, url: URL): Promise<Respon
     [...conversationService.getRecentSdkMessages(sessionId)]
     .reverse()
     .find((message) => message?.type === 'system' && message.subtype === 'init')
-  const transcriptMetadata = await sessionService.getTranscriptMetadata(sessionId)
+  const transcriptMetadata = !active || !initMessage
+    ? (await getTranscriptSnapshot())?.metadata ?? null
+    : null
   const cachedSlashCommands = getSlashCommands(sessionId)
   const skillSlashCommands = await listSkillSlashCommands(workDir)
   const fallbackSlashCommands = cachedSlashCommands.length > 0
@@ -586,13 +610,14 @@ async function getSessionInspection(sessionId: string, url: URL): Promise<Respon
     },
     errors: {},
   }
-  const transcriptUsage = await sessionService.getTranscriptUsage(sessionId)
-  const transcriptContextEstimate = await sessionService.getTranscriptContextEstimate(sessionId)
-  if (transcriptContextEstimate) {
-    response.contextEstimate = transcriptContextEstimate
-  }
 
   if (!active) {
+    const snapshot = await getTranscriptSnapshot()
+    const transcriptUsage = snapshot?.usage ?? null
+    const transcriptContextEstimate = snapshot?.contextEstimate ?? null
+    if (transcriptContextEstimate) {
+      response.contextEstimate = transcriptContextEstimate
+    }
     if (transcriptUsage) {
       response.usage = transcriptUsage
     }
@@ -614,6 +639,12 @@ async function getSessionInspection(sessionId: string, url: URL): Promise<Respon
     } catch (error) {
       errors.context = error instanceof Error ? error.message : String(error)
     }
+    if (!response.context) {
+      const transcriptContextEstimate = (await getTranscriptSnapshot())?.contextEstimate ?? null
+      if (transcriptContextEstimate) {
+        response.contextEstimate = transcriptContextEstimate
+      }
+    }
   } else {
     const basicControlTimeoutMs = includeContext ? 10_000 : 4_000
     const [usageResult, contextResult, mcpResult] = await Promise.allSettled([
@@ -629,11 +660,13 @@ async function getSessionInspection(sessionId: string, url: URL): Promise<Respon
     ])
 
     if (usageResult.status === 'fulfilled') {
+      const transcriptUsage = (await getTranscriptSnapshot())?.usage ?? null
       response.usage = chooseRicherUsage(
         { ...usageResult.value, source: 'current_process' },
         transcriptUsage,
       )
     } else {
+      const transcriptUsage = (await getTranscriptSnapshot())?.usage ?? null
       if (transcriptUsage) {
         response.usage = transcriptUsage
       } else {
@@ -648,6 +681,10 @@ async function getSessionInspection(sessionId: string, url: URL): Promise<Respon
       response.context = contextResult.value
     } else {
       errors.context = contextResult.reason instanceof Error ? contextResult.reason.message : String(contextResult.reason)
+      const transcriptContextEstimate = (await getTranscriptSnapshot())?.contextEstimate ?? null
+      if (transcriptContextEstimate) {
+        response.contextEstimate = transcriptContextEstimate
+      }
     }
 
     if (mcpResult.status === 'fulfilled' && response.status && typeof response.status === 'object') {
