@@ -463,6 +463,8 @@ export const jp: Record<TranslationKey, string> = {
   'settings.providers.toolSearchEnabled': 'Tool Search を有効にする',
   'settings.providers.toolSearchDesc': 'MCP と遅延ツールを必要に応じて読み込み、初回のツール schema トークンを減らします。弱いモデルや tool_reference を拒否するプロバイダーでは無効にできます。',
   'settings.providers.toolSearchUnsupported': 'ここでは Anthropic Messages 形式のプロバイダーのみ Tool Search をサポートします。OpenAI プロキシ形式では完全なツール schema を維持します。',
+  'settings.providers.disableExperimentalBetas': '実験的な Beta ヘッダーを無効化',
+  'settings.providers.disableExperimentalBetasDesc': 'このプロバイダーに CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1 を設定し、サードパーティゲートウェイが拒否する可能性のある beta API 形式を避けます。',
 
   // Settings > Permissions
   'settings.permissions.title': '権限モード',

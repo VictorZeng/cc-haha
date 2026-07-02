@@ -461,6 +461,8 @@ export const en = {
   'settings.providers.toolSearchEnabled': 'Enable Tool Search',
   'settings.providers.toolSearchDesc': 'Load MCP and deferred tools on demand to reduce initial tool schema tokens. Disable it for weak models or providers that reject tool references.',
   'settings.providers.toolSearchUnsupported': 'Only Anthropic Messages providers support Tool Search here. OpenAI proxy formats keep full tool schemas available.',
+  'settings.providers.disableExperimentalBetas': 'Disable experimental beta headers',
+  'settings.providers.disableExperimentalBetasDesc': 'Sets CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1 for this provider to avoid beta API shapes that third-party gateways may reject.',
 
   // Settings > Permissions
   'settings.permissions.title': 'Permission Mode',

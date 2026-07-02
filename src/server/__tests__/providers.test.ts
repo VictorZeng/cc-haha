@@ -846,6 +846,36 @@ describe('ProviderService', () => {
       expect(runtimeEnv.ENABLE_TOOL_SEARCH).toBe('false')
     })
 
+    test('should persist disabled experimental betas on activation and runtime env', async () => {
+      const svc = new ProviderService()
+      const provider = await svc.addProvider(sampleInput({
+        disableExperimentalBetas: true,
+      }))
+
+      expect(provider.disableExperimentalBetas).toBe(true)
+      const config = await readProvidersConfig()
+      expect((config.providers as Array<Record<string, unknown>>)[0]?.disableExperimentalBetas).toBe(true)
+
+      await svc.activateProvider(provider.id)
+
+      const settings = await readSettings()
+      const env = settings.env as Record<string, string>
+      expect(env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS).toBe('1')
+
+      const runtimeEnv = await svc.getProviderRuntimeEnv(provider.id)
+      expect(runtimeEnv.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS).toBe('1')
+
+      const updated = await svc.updateProvider(provider.id, { disableExperimentalBetas: false })
+      expect(updated.disableExperimentalBetas).toBeUndefined()
+
+      const clearedSettings = await readSettings()
+      const clearedEnv = clearedSettings.env as Record<string, string>
+      expect(clearedEnv.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS).toBeUndefined()
+
+      const clearedRuntimeEnv = await svc.getProviderRuntimeEnv(provider.id)
+      expect(clearedRuntimeEnv.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS).toBeUndefined()
+    })
+
     test('should preserve attribution header for Claude-prefixed provider models', async () => {
       const svc = new ProviderService()
       const provider = await svc.addProvider(sampleInput({
@@ -1718,6 +1748,7 @@ describe('Providers API', () => {
       apiKey: 'sk-test',
       apiFormat: 'anthropic',
       autoCompactWindow: 64000,
+      disableExperimentalBetas: true,
       models: {
         main: 'gpt-4',
         haiku: 'gpt-4-haiku',
@@ -1728,10 +1759,11 @@ describe('Providers API', () => {
     const res = await handleProvidersApi(req, url, segments)
 
     expect(res.status).toBe(201)
-    const body = (await res.json()) as { provider: { name: string; models: { main: string }; autoCompactWindow: number } }
+    const body = (await res.json()) as { provider: { name: string; models: { main: string }; autoCompactWindow: number; disableExperimentalBetas?: boolean } }
     expect(body.provider.name).toBe('New Provider')
     expect(body.provider.models.main).toBe('gpt-4')
     expect(body.provider.autoCompactWindow).toBe(64000)
+    expect(body.provider.disableExperimentalBetas).toBe(true)
   })
 
   test('POST /api/providers should return 400 for invalid input', async () => {
@@ -1841,12 +1873,14 @@ describe('Providers API', () => {
 
     const { req, url, segments } = makeRequest('PUT', `/api/providers/${added.id}`, {
       name: 'Renamed Provider',
+      disableExperimentalBetas: true,
     })
     const res = await handleProvidersApi(req, url, segments)
 
     expect(res.status).toBe(200)
-    const body = (await res.json()) as { provider: { name: string } }
+    const body = (await res.json()) as { provider: { name: string; disableExperimentalBetas?: boolean } }
     expect(body.provider.name).toBe('Renamed Provider')
+    expect(body.provider.disableExperimentalBetas).toBe(true)
   })
 
   // ─── DELETE /api/providers/:id ───────────────────────────────────────────

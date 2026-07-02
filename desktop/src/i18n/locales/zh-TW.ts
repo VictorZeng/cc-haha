@@ -463,6 +463,8 @@ export const zh: Record<TranslationKey, string> = {
   'settings.providers.toolSearchEnabled': '啟用 Tool Search',
   'settings.providers.toolSearchDesc': '按需載入 MCP 和延遲工具，減少首輪工具 schema token。弱模型或不支援 tool_reference 的服務商可以關閉。',
   'settings.providers.toolSearchUnsupported': '目前僅 Anthropic Messages 格式支援 Tool Search；OpenAI 代理格式會保留完整工具 schema。',
+  'settings.providers.disableExperimentalBetas': '關閉實驗性 Beta 標頭',
+  'settings.providers.disableExperimentalBetasDesc': '為此服務商設定 CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1，避免第三方通道拒絕 beta API 形態。',
 
   // Settings > Permissions
   'settings.permissions.title': '許可權模式',

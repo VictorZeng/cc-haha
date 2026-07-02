@@ -1941,6 +1941,76 @@ describe('Settings > Providers tab', () => {
     }))
   })
 
+  it('defaults experimental beta headers on and persists a provider disable', async () => {
+    MOCK_GET_SETTINGS.mockResolvedValue({ env: { EXISTING_ENV: '1' } })
+    providerStoreState.createProvider = vi.fn().mockResolvedValue({
+      id: 'provider-new',
+      presetId: 'custom',
+      name: 'Custom',
+      apiKey: 'sk-test',
+      baseUrl: 'https://api.example.com/anthropic',
+      apiFormat: 'anthropic',
+      disableExperimentalBetas: true,
+      models: {
+        main: 'custom-main',
+        haiku: 'custom-main',
+        sonnet: 'custom-main',
+        opus: 'custom-main',
+      },
+    })
+    providerStoreState.presets = [
+      {
+        id: 'custom',
+        name: 'Custom',
+        baseUrl: 'https://api.example.com/anthropic',
+        apiFormat: 'anthropic',
+        defaultModels: {
+          main: 'custom-main',
+          haiku: '',
+          sonnet: '',
+          opus: '',
+        },
+        needsApiKey: true,
+        websiteUrl: '',
+      },
+    ]
+
+    render(<Settings />)
+
+    fireEvent.click(screen.getByRole('button', { name: /Add Provider/i }))
+    const dialog = screen.getByRole('dialog')
+    const disableBetasCheckbox = within(dialog).getByRole('checkbox', { name: 'Disable experimental beta headers' })
+    const settingsTextarea = await waitFor(() => {
+      const textarea = dialog.querySelector('textarea')
+      expect(textarea?.value).toContain('"ANTHROPIC_MODEL"')
+      return textarea as HTMLTextAreaElement
+    })
+
+    expect(disableBetasCheckbox).not.toBeChecked()
+    expect(settingsTextarea.value).not.toContain('CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS')
+
+    fireEvent.click(disableBetasCheckbox)
+    expect(disableBetasCheckbox).toBeChecked()
+    await waitFor(() => {
+      expect(settingsTextarea.value).toContain('"CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS": "1"')
+    })
+
+    fireEvent.change(within(dialog).getByPlaceholderText('sk-...'), { target: { value: 'sk-test' } })
+    fireEvent.click(within(dialog).getByRole('button', { name: /Save|Add/i }))
+
+    await waitFor(() => {
+      expect(providerStoreState.createProvider).toHaveBeenCalledWith(expect.objectContaining({
+        disableExperimentalBetas: true,
+      }))
+    })
+    expect(MOCK_UPDATE_SETTINGS).toHaveBeenCalledWith(expect.objectContaining({
+      env: expect.objectContaining({
+        EXISTING_ENV: '1',
+        CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',
+      }),
+    }))
+  })
+
   it('saves 1M model declarations for the main and role mappings', async () => {
     providerStoreState.createProvider = vi.fn().mockResolvedValue({
       id: 'provider-new',

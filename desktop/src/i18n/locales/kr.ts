@@ -463,6 +463,8 @@ export const kr: Record<TranslationKey, string> = {
   'settings.providers.toolSearchEnabled': 'Tool Search 사용',
   'settings.providers.toolSearchDesc': 'MCP와 지연 도구를 필요할 때 로드해 초기 도구 schema 토큰을 줄입니다. 약한 모델이나 tool_reference를 거부하는 공급자에서는 끌 수 있습니다.',
   'settings.providers.toolSearchUnsupported': '여기서는 Anthropic Messages 형식 공급자만 Tool Search를 지원합니다. OpenAI 프록시 형식은 전체 도구 schema를 유지합니다.',
+  'settings.providers.disableExperimentalBetas': '실험적 Beta 헤더 비활성화',
+  'settings.providers.disableExperimentalBetasDesc': '이 공급자에 CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1을 설정해 타사 게이트웨이가 거부할 수 있는 beta API 형식을 피합니다.',
 
   // Settings > Permissions
   'settings.permissions.title': '권한 모드',

@@ -228,6 +228,7 @@ export class ProviderService {
       ...(input.autoCompactWindow !== undefined && { autoCompactWindow: input.autoCompactWindow }),
       ...(input.modelContextWindows !== undefined && { modelContextWindows: input.modelContextWindows }),
       toolSearchEnabled: input.toolSearchEnabled ?? true,
+      ...(input.disableExperimentalBetas === true && { disableExperimentalBetas: true }),
       ...(input.notes !== undefined && { notes: input.notes }),
     }
 
@@ -256,6 +257,7 @@ export class ProviderService {
       ...(typeof input.autoCompactWindow === 'number' && { autoCompactWindow: input.autoCompactWindow }),
       ...(input.modelContextWindows !== undefined && input.modelContextWindows !== null && { modelContextWindows: input.modelContextWindows }),
       ...(input.toolSearchEnabled !== undefined && { toolSearchEnabled: input.toolSearchEnabled }),
+      ...(input.disableExperimentalBetas === true && { disableExperimentalBetas: true }),
       ...(input.notes !== undefined && { notes: input.notes }),
     }
     if (input.model1mSupport === null) {
@@ -266,6 +268,9 @@ export class ProviderService {
     }
     if (input.modelContextWindows === null) {
       delete updated.modelContextWindows
+    }
+    if (input.disableExperimentalBetas === false) {
+      delete updated.disableExperimentalBetas
     }
 
     index.providers[idx] = updated

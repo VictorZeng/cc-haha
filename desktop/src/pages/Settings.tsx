@@ -705,6 +705,7 @@ function requirePreset(preset: ProviderPreset | undefined): ProviderPreset {
 
 const AUTO_COMPACT_WINDOW_ENV_KEY = 'CLAUDE_CODE_AUTO_COMPACT_WINDOW'
 const MODEL_CONTEXT_WINDOWS_ENV_KEY = 'CLAUDE_CODE_MODEL_CONTEXT_WINDOWS'
+const DISABLE_EXPERIMENTAL_BETAS_ENV_KEY = 'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS'
 const MODEL_CONTEXT_WINDOW_MIN = 16000
 const MODEL_CONTEXT_WINDOW_MAX = 10000000
 const MODEL_1M_CONTEXT_WINDOW = 1000000
@@ -961,6 +962,17 @@ function applyToolSearchEnv(
   }
 }
 
+function applyDisableExperimentalBetasEnv(
+  env: Record<string, unknown>,
+  disableExperimentalBetas: boolean,
+): void {
+  if (disableExperimentalBetas) {
+    env[DISABLE_EXPERIMENTAL_BETAS_ENV_KEY] = '1'
+  } else {
+    delete env[DISABLE_EXPERIMENTAL_BETAS_ENV_KEY]
+  }
+}
+
 function updateSettingsJsonToolSearch(
   raw: string,
   apiFormat: ApiFormat,
@@ -980,6 +992,24 @@ function updateSettingsJsonToolSearch(
   }
 }
 
+function updateSettingsJsonDisableExperimentalBetas(
+  raw: string,
+  disableExperimentalBetas: boolean,
+): string {
+  try {
+    const parsed = JSON.parse(raw || '{}') as { env?: Record<string, unknown> }
+    const existingEnv = parsed.env && typeof parsed.env === 'object' && !Array.isArray(parsed.env)
+      ? parsed.env
+      : {}
+    const env = { ...existingEnv }
+    applyDisableExperimentalBetasEnv(env, disableExperimentalBetas)
+    parsed.env = env
+    return JSON.stringify(parsed, null, 2)
+  } catch {
+    return raw
+  }
+}
+
 function readToolSearchEnabledFromEnv(env: Record<string, unknown>): boolean {
   const value = env.ENABLE_TOOL_SEARCH
   if (typeof value === 'boolean') return value
@@ -992,6 +1022,18 @@ function readToolSearchEnabledFromEnv(env: Record<string, unknown>): boolean {
     }
   }
   return true
+}
+
+function readDisableExperimentalBetasFromEnv(env: Record<string, unknown>): boolean {
+  const value = env[DISABLE_EXPERIMENTAL_BETAS_ENV_KEY]
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value !== 0
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (['0', 'false', 'off', 'no'].includes(normalized)) return false
+    if (['1', 'true', 'on', 'yes'].includes(normalized)) return true
+  }
+  return false
 }
 
 function updateSettingsJsonAutoCompactWindow(raw: string, value: string): string {
@@ -1069,6 +1111,7 @@ function updateSettingsJsonProviderConnection(
   baseUrl: string,
   proxyBaseUrl: string,
   toolSearchEnabled = true,
+  disableExperimentalBetas = false,
 ): string {
   try {
     const parsed = JSON.parse(raw || '{}') as { env?: Record<string, unknown> }
@@ -1079,6 +1122,7 @@ function updateSettingsJsonProviderConnection(
     delete env.ANTHROPIC_API_KEY
     delete env.ANTHROPIC_AUTH_TOKEN
     applyToolSearchEnv(env, apiFormat, toolSearchEnabled)
+    applyDisableExperimentalBetasEnv(env, disableExperimentalBetas)
     env.ANTHROPIC_BASE_URL = apiFormat !== 'anthropic' ? proxyBaseUrl : baseUrl
     Object.assign(env, buildSettingsJsonAuthEnv(apiFormat, authStrategy, apiKey, preset))
     parsed.env = env
@@ -1161,6 +1205,7 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
       : getPresetAutoCompactWindow(initialPreset),
   )
   const [toolSearchEnabled, setToolSearchEnabled] = useState(provider?.toolSearchEnabled ?? true)
+  const [disableExperimentalBetas, setDisableExperimentalBetas] = useState(provider?.disableExperimentalBetas ?? false)
   const [showContextSettings, setShowContextSettings] = useState(false)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [testResult, setTestResult] = useState<ProviderTestResult | null>(null)
@@ -1201,6 +1246,7 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
           ANTHROPIC_DEFAULT_OPUS_MODEL: runtimeModels.opus,
         }
         applyToolSearchEnv(mergedEnv, apiFormat, toolSearchEnabled)
+        applyDisableExperimentalBetasEnv(mergedEnv, disableExperimentalBetas)
         const merged = {
           ...settings,
           skipWebFetchPreflight: settings.skipWebFetchPreflight ?? true,
@@ -1231,6 +1277,7 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
     setModelContextInputs(nextModelContextInputs)
     setAutoCompactWindow(getPresetAutoCompactWindow(preset))
     setToolSearchEnabled(true)
+    setDisableExperimentalBetas(false)
     setShowContextSettings(false)
     setTestResult(null)
   }
@@ -1320,24 +1367,28 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
   }
   const handleBaseUrlChange = (value: string) => {
     setBaseUrl(value)
-    setSettingsJson((current) => updateSettingsJsonProviderConnection(current, apiFormat, authStrategy, apiKey, selectedPreset, value, providerProxyBaseUrl, toolSearchEnabled))
+    setSettingsJson((current) => updateSettingsJsonProviderConnection(current, apiFormat, authStrategy, apiKey, selectedPreset, value, providerProxyBaseUrl, toolSearchEnabled, disableExperimentalBetas))
   }
   const handleApiKeyChange = (value: string) => {
     setApiKey(value)
-    setSettingsJson((current) => updateSettingsJsonProviderConnection(current, apiFormat, authStrategy, value, selectedPreset, baseUrl, providerProxyBaseUrl, toolSearchEnabled))
+    setSettingsJson((current) => updateSettingsJsonProviderConnection(current, apiFormat, authStrategy, value, selectedPreset, baseUrl, providerProxyBaseUrl, toolSearchEnabled, disableExperimentalBetas))
   }
   const handleApiFormatChange = (value: ApiFormat) => {
     setApiFormat(value)
-    setSettingsJson((current) => updateSettingsJsonProviderConnection(current, value, authStrategy, apiKey, selectedPreset, baseUrl, providerProxyBaseUrl, toolSearchEnabled))
+    setSettingsJson((current) => updateSettingsJsonProviderConnection(current, value, authStrategy, apiKey, selectedPreset, baseUrl, providerProxyBaseUrl, toolSearchEnabled, disableExperimentalBetas))
   }
   const handleAuthStrategyChange = (value: ProviderAuthStrategy) => {
     setAuthStrategy(value)
-    setSettingsJson((current) => updateSettingsJsonProviderConnection(current, apiFormat, value, apiKey, selectedPreset, baseUrl, providerProxyBaseUrl, toolSearchEnabled))
+    setSettingsJson((current) => updateSettingsJsonProviderConnection(current, apiFormat, value, apiKey, selectedPreset, baseUrl, providerProxyBaseUrl, toolSearchEnabled, disableExperimentalBetas))
   }
   const handleToolSearchToggle = (enabled: boolean) => {
     if (toolSearchUnsupported) return
     setToolSearchEnabled(enabled)
     setSettingsJson((current) => updateSettingsJsonToolSearch(current, apiFormat, enabled))
+  }
+  const handleDisableExperimentalBetasToggle = (disabled: boolean) => {
+    setDisableExperimentalBetas(disabled)
+    setSettingsJson((current) => updateSettingsJsonDisableExperimentalBetas(current, disabled))
   }
   const handleModelChange = (slot: ModelSlot, value: string) => {
     const hasMarker = hasModel1mMarker(value)
@@ -1429,6 +1480,7 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
           ...(parsedAutoCompactWindow !== undefined && { autoCompactWindow: parsedAutoCompactWindow }),
           ...(Object.keys(parsedModelContextWindows).length > 0 && { modelContextWindows: parsedModelContextWindows }),
           toolSearchEnabled,
+          ...(disableExperimentalBetas && { disableExperimentalBetas }),
           notes: notes.trim() || undefined,
         })
       } else if (provider) {
@@ -1444,6 +1496,7 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
             ? parsedModelContextWindows
             : null,
           toolSearchEnabled,
+          disableExperimentalBetas,
           notes: notes.trim() || undefined,
         }
         if (apiKey.trim()) input.apiKey = apiKey.trim()
@@ -1610,6 +1663,25 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
             </div>
             <div className="mt-1 text-xs leading-5 text-[var(--color-text-tertiary)]">
               {toolSearchDescription}
+            </div>
+          </div>
+        </label>
+
+        <label className="relative flex cursor-pointer items-start gap-3 rounded-[var(--radius-md)] border border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-3 py-3 transition-colors hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)]">
+          <input
+            type="checkbox"
+            aria-label={t('settings.providers.disableExperimentalBetas')}
+            checked={disableExperimentalBetas}
+            onChange={(e) => handleDisableExperimentalBetasToggle(e.target.checked)}
+            className={SETTINGS_CHECKBOX_INPUT_CLASS}
+          />
+          <SettingsCheckboxMark checked={disableExperimentalBetas} />
+          <div className="min-w-0">
+            <div className="text-sm font-medium text-[var(--color-text-primary)]">
+              {t('settings.providers.disableExperimentalBetas')}
+            </div>
+            <div className="mt-1 text-xs leading-5 text-[var(--color-text-tertiary)]">
+              {t('settings.providers.disableExperimentalBetasDesc')}
             </div>
           </div>
         </label>
@@ -1859,6 +1931,7 @@ function ProviderFormModal({ open, onClose, mode, provider, presets }: ProviderF
                     setAuthStrategy(nextAuthStrategy)
                   }
                   setToolSearchEnabled(readToolSearchEnabledFromEnv(env))
+                  setDisableExperimentalBetas(readDisableExperimentalBetasFromEnv(env))
                   if (env[AUTO_COMPACT_WINDOW_ENV_KEY] !== undefined) {
                     setAutoCompactWindow(String(env[AUTO_COMPACT_WINDOW_ENV_KEY]))
                   } else {
