@@ -37,8 +37,38 @@ type SkillHubDetailResponse = {
   }
 }
 
+const ALLOWED_EXTERNAL_URL_HOSTS = new Set([
+  'clawhub.ai',
+  'skillhub.cn',
+  'api.skillhub.cn',
+  'github.com',
+  'raw.githubusercontent.com',
+])
+
 function requiresApiKey(labels?: { requires_api_key?: string }) {
   return labels?.requires_api_key === 'true'
+}
+
+function skillHubCanonicalUrl(slug: string) {
+  return `https://skillhub.cn/skills/${encodeURIComponent(slug)}`
+}
+
+function normalizeExternalUrl(value: string | undefined, slug: string) {
+  const fallbackUrl = skillHubCanonicalUrl(slug)
+  if (!value) {
+    return fallbackUrl
+  }
+
+  try {
+    const url = new URL(value)
+    if (url.protocol === 'https:' && ALLOWED_EXTERNAL_URL_HOSTS.has(url.hostname)) {
+      return url.toString()
+    }
+  } catch {
+    return fallbackUrl
+  }
+
+  return fallbackUrl
 }
 
 function trustFromReports(reports?: Record<string, { status?: string; statusText?: string }>): {
@@ -58,25 +88,30 @@ function trustFromReports(reports?: Record<string, { status?: string; statusText
 export function normalizeSkillHubList(payload: SkillHubListResponse): SkillMarketListResult {
   const items = (payload.data?.skills ?? [])
     .filter((item) => item.slug && item.name)
-    .map((item): SkillMarketItem => ({
-      source: 'skillhub',
-      sourceMode: 'fallback',
-      slug: item.slug!,
-      displayName: item.name!,
-      summary: item.description || item.description_zh || '',
-      summaryZh: item.description_zh,
-      owner: item.ownerName,
-      canonicalUrl: item.upstream_url || `https://skillhub.cn/skills/${item.slug}`,
-      upstreamUrl: item.upstream_url,
-      version: item.version,
-      downloads: item.downloads,
-      installs: item.installs,
-      stars: item.stars,
-      category: item.category,
-      requiresApiKey: requiresApiKey(item.labels),
-      trustState: item.verified ? 'signed' : 'benign',
-      installed: false,
-    }))
+    .map((item): SkillMarketItem => {
+      const slug = item.slug!
+      const normalizedUrl = normalizeExternalUrl(item.upstream_url, slug)
+
+      return {
+        source: 'skillhub',
+        sourceMode: 'fallback',
+        slug,
+        displayName: item.name!,
+        summary: item.description || item.description_zh || '',
+        summaryZh: item.description_zh,
+        owner: item.ownerName,
+        canonicalUrl: normalizedUrl,
+        upstreamUrl: normalizedUrl,
+        version: item.version,
+        downloads: item.downloads,
+        installs: item.installs,
+        stars: item.stars,
+        category: item.category,
+        requiresApiKey: requiresApiKey(item.labels),
+        trustState: item.verified ? 'signed' : 'unknown',
+        installed: false,
+      }
+    })
 
   return {
     items,
@@ -90,6 +125,7 @@ export function normalizeSkillHubDetail(payload: SkillHubDetailResponse): SkillM
   const trust = trustFromReports(payload.securityReports)
   const skill = payload.skill ?? {}
   const slug = skill.slug || 'unknown'
+  const normalizedUrl = normalizeExternalUrl(skill.sourceUrl, slug)
 
   return {
     source: 'skillhub',
@@ -99,7 +135,7 @@ export function normalizeSkillHubDetail(payload: SkillHubDetailResponse): SkillM
     summary: skill.summary || skill.summary_zh || '',
     summaryZh: skill.summary_zh,
     owner: payload.owner?.handle || payload.owner?.displayName,
-    canonicalUrl: skill.sourceUrl || `https://skillhub.cn/skills/${slug}`,
+    canonicalUrl: normalizedUrl,
     version: payload.latestVersion?.version,
     downloads: skill.stats?.downloads,
     installs: skill.stats?.installs,

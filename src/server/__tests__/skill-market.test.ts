@@ -51,6 +51,12 @@ describe('skill market source normalization', () => {
     })
   })
 
+  it('keeps malicious ClawHub scan responses blocked even with warnings', () => {
+    expect(normalizeClawHubScan({ status: 'malicious', hasWarnings: true })).toMatchObject({
+      trustState: 'blocked',
+    })
+  })
+
   it('normalizes SkillHub list items as fallback candidates with Chinese summary', () => {
     const result = normalizeSkillHubList(SKILLHUB_TOP_SKILLS_RESPONSE)
 
@@ -60,8 +66,67 @@ describe('skill market source normalization', () => {
       slug: 'skill-vetter',
       summaryZh: 'AI智能体技能安全预审工具。',
       canonicalUrl: 'https://clawhub.ai/spclaudehome/skill-vetter',
-      trustState: 'benign',
+      trustState: 'unknown',
       requiresApiKey: false,
+    })
+  })
+
+  it('normalizes verified SkillHub list items as signed', () => {
+    const result = normalizeSkillHubList({
+      code: 0,
+      data: {
+        skills: [
+          {
+            slug: 'verified-skill',
+            name: 'Verified Skill',
+            upstream_url: 'https://github.com/example/verified-skill',
+            verified: true,
+          },
+        ],
+      },
+    })
+
+    expect(result.items[0]).toMatchObject({
+      slug: 'verified-skill',
+      canonicalUrl: 'https://github.com/example/verified-skill',
+      upstreamUrl: 'https://github.com/example/verified-skill',
+      trustState: 'signed',
+    })
+  })
+
+  it('falls back when SkillHub external URLs are invalid', () => {
+    const list = normalizeSkillHubList({
+      code: 0,
+      data: {
+        skills: [
+          {
+            slug: 'unsafe/slug',
+            name: 'Unsafe URL Skill',
+            upstream_url: 'http://evil.test/unsafe/slug',
+          },
+        ],
+      },
+    })
+
+    expect(list.items[0]).toMatchObject({
+      canonicalUrl: 'https://skillhub.cn/skills/unsafe%2Fslug',
+      upstreamUrl: 'https://skillhub.cn/skills/unsafe%2Fslug',
+    })
+
+    const detail = normalizeSkillHubDetail({
+      securityReports: {
+        keen: { status: 'benign', statusText: 'safe' },
+      },
+      skill: {
+        slug: 'unsafe/slug',
+        displayName: 'Unsafe URL Skill',
+        sourceUrl: 'https://evil.test/unsafe/slug',
+      },
+    })
+
+    expect(detail).toMatchObject({
+      canonicalUrl: 'https://skillhub.cn/skills/unsafe%2Fslug',
+      trustState: 'benign',
     })
   })
 

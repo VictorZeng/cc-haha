@@ -60,11 +60,11 @@ export function normalizeClawHubScan(payload: ClawHubScanResponse): {
   if (payload.status === 'clean' && !payload.hasWarnings) {
     return { trustState: 'clean', trustSummary: scannerSummary, packageSha256: payload.sha256 }
   }
-  if (payload.status === 'suspicious' || payload.hasWarnings) {
-    return { trustState: 'warning', trustSummary: scannerSummary, packageSha256: payload.sha256 }
-  }
   if (payload.status === 'malicious' || payload.status === 'blocked') {
     return { trustState: 'blocked', trustSummary: scannerSummary, packageSha256: payload.sha256 }
+  }
+  if (payload.status === 'suspicious' || payload.hasWarnings) {
+    return { trustState: 'warning', trustSummary: scannerSummary, packageSha256: payload.sha256 }
   }
   return { trustState: 'unknown', trustSummary: scannerSummary, packageSha256: payload.sha256 }
 }
