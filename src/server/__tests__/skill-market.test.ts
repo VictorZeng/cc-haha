@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'bun:test'
+import { normalizeClawHubList, normalizeClawHubScan } from '../services/skillMarket/clawhubAdapter.js'
+import { normalizeSkillHubDetail, normalizeSkillHubList } from '../services/skillMarket/skillhubAdapter.js'
 import {
+  CLAWHUB_SCAN_RESPONSE,
   CLAWHUB_TOP_SKILLS_RESPONSE,
+  SKILLHUB_DETAIL_RESPONSE,
   SKILLHUB_TOP_SKILLS_RESPONSE,
 } from './fixtures/skill-market.js'
 
@@ -18,6 +22,58 @@ describe('skill market fixtures', () => {
       slug: 'skill-vetter',
       source: 'clawhub',
       labels: expect.objectContaining({ requires_api_key: 'false' }),
+    })
+  })
+})
+
+describe('skill market source normalization', () => {
+  it('normalizes ClawHub catalog items as primary clean candidates', () => {
+    const result = normalizeClawHubList(CLAWHUB_TOP_SKILLS_RESPONSE)
+
+    expect(result.items).toHaveLength(1)
+    expect(result.items[0]).toMatchObject({
+      source: 'clawhub',
+      sourceMode: 'primary',
+      slug: 'skill-vetter',
+      displayName: 'Skill Vetter',
+      canonicalUrl: 'https://clawhub.ai/skill-vetter',
+      trustState: 'clean',
+      installed: false,
+      requiresApiKey: false,
+    })
+  })
+
+  it('normalizes ClawHub scan responses into trust metadata', () => {
+    expect(normalizeClawHubScan(CLAWHUB_SCAN_RESPONSE)).toEqual({
+      trustState: 'clean',
+      trustSummary: 'No dangerous patterns detected.',
+      packageSha256: 'a'.repeat(64),
+    })
+  })
+
+  it('normalizes SkillHub list items as fallback candidates with Chinese summary', () => {
+    const result = normalizeSkillHubList(SKILLHUB_TOP_SKILLS_RESPONSE)
+
+    expect(result.items[0]).toMatchObject({
+      source: 'skillhub',
+      sourceMode: 'fallback',
+      slug: 'skill-vetter',
+      summaryZh: 'AI智能体技能安全预审工具。',
+      canonicalUrl: 'https://clawhub.ai/spclaudehome/skill-vetter',
+      trustState: 'benign',
+      requiresApiKey: false,
+    })
+  })
+
+  it('normalizes SkillHub detail security reports', () => {
+    const detail = normalizeSkillHubDetail(SKILLHUB_DETAIL_RESPONSE)
+
+    expect(detail).toMatchObject({
+      source: 'skillhub',
+      sourceMode: 'fallback',
+      slug: 'skill-vetter',
+      trustState: 'benign',
+      trustSummary: '安全，无风险',
     })
   })
 })
