@@ -1596,6 +1596,38 @@ describe('MessageList nested tool calls', () => {
     expect(screen.getByRole('button', { name: 'Close dialog' })).toBeTruthy()
   })
 
+  it('opens the SubAgent run tab from an agent tool card', () => {
+    useChatStore.setState({
+      sessions: {
+        [ACTIVE_TAB]: makeSessionState({
+          messages: [
+            {
+              id: 'tool-agent',
+              type: 'tool_use',
+              toolName: 'Agent',
+              toolUseId: 'agent-1',
+              input: { description: 'Inspect src/components' },
+              timestamp: 1,
+            },
+          ],
+        }),
+      },
+    })
+
+    render(<MessageList />)
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open run Inspect src/components' }))
+
+    const expectedTabId = '__subagent__active-tab__agent-1'
+    expect(useTabStore.getState().activeTabId).toBe(expectedTabId)
+    expect(useTabStore.getState().tabs.find((tab) => tab.sessionId === expectedTabId)).toMatchObject({
+      title: 'Inspect src/components',
+      type: 'subagent',
+      sourceSessionId: ACTIVE_TAB,
+      subagentToolUseId: 'agent-1',
+    })
+  })
+
   it('keeps async launched agents in running state until a terminal notification arrives', () => {
     useChatStore.setState({
       sessions: {

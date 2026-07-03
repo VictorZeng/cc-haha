@@ -66,6 +66,29 @@ describe('tabStore', () => {
     }))
   })
 
+  it('opens one ephemeral SubAgent tab per source session and tool use', () => {
+    const tabId = useTabStore.getState().openSubagentTab('session-1', 'tool-1', 'Kuhn')
+    const sameTabId = useTabStore.getState().openSubagentTab('session-1', 'tool-1', 'Kuhn updated')
+
+    expect(tabId).toBe('__subagent__session-1__tool-1')
+    expect(sameTabId).toBe(tabId)
+    expect(useTabStore.getState().tabs).toEqual([
+      {
+        sessionId: '__subagent__session-1__tool-1',
+        title: 'Kuhn updated',
+        type: 'subagent',
+        status: 'idle',
+        sourceSessionId: 'session-1',
+        subagentToolUseId: 'tool-1',
+      },
+    ])
+    expect(useTabStore.getState().activeTabId).toBe('__subagent__session-1__tool-1')
+    expect(localStorage.getItem('cc-haha-open-tabs')).toBe(JSON.stringify({
+      openTabs: [],
+      activeTabId: null,
+    }))
+  })
+
   it('does not let async tab restore overwrite tabs opened while restore is in flight', async () => {
     let resolveSessions: (value: unknown) => void = () => {}
     vi.mocked(sessionsApi.list).mockReturnValueOnce(new Promise((resolve) => {

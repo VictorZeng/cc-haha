@@ -7,6 +7,7 @@ import { Settings } from '../../pages/Settings'
 import { TerminalSettings } from '../../pages/TerminalSettings'
 import { TraceList } from '../../pages/TraceList'
 import { TraceSession } from '../../pages/TraceSession'
+import { SubagentRunPage } from '../../pages/SubagentRunPage'
 import { WorkbenchTab } from '../workbench/WorkbenchTab'
 import { previewBridge } from '../../lib/previewBridge'
 
@@ -33,6 +34,17 @@ export function ContentRouter() {
     page = traceSessionId ? <TraceSession sessionId={traceSessionId} /> : <EmptySession />
   } else if (activeTabType === 'traces') {
     page = <TraceList />
+  } else if (activeTabType === 'subagent') {
+    const subagentTab = tabs.find((t) => t.sessionId === activeTabId)
+    page = subagentTab?.sourceSessionId && subagentTab.subagentToolUseId
+      ? (
+        <SubagentRunPage
+          sourceSessionId={subagentTab.sourceSessionId}
+          toolUseId={subagentTab.subagentToolUseId}
+          title={subagentTab.title}
+        />
+      )
+      : <EmptySession />
   } else if (activeTabType === 'workbench') {
     const workbenchTab = tabs.find((t) => t.sessionId === activeTabId)
     page = workbenchTab?.workbenchSessionId

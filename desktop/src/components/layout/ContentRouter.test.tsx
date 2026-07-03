@@ -42,6 +42,12 @@ vi.mock('../../pages/TraceList', () => ({
   TraceList: () => <div data-testid="trace-list" />,
 }))
 
+vi.mock('../../pages/SubagentRunPage', () => ({
+  SubagentRunPage: ({ sourceSessionId, toolUseId, title }: { sourceSessionId: string; toolUseId: string; title: string }) => (
+    <div data-testid="subagent-run-page">{sourceSessionId}:{toolUseId}:{title}</div>
+  ),
+}))
+
 vi.mock('../workbench/WorkbenchTab', () => ({
   WorkbenchTab: ({ sessionId, tabId }: { sessionId: string; tabId: string }) => (
     <div data-testid="workbench-tab">workbench:{sessionId}:{tabId}</div>
@@ -152,6 +158,42 @@ describe('ContentRouter tab surfaces', () => {
 
     expect(screen.getByTestId('trace-list')).toBeInTheDocument()
     expect(screen.queryByTestId('active-session')).not.toBeInTheDocument()
+  })
+
+  it('renders SubAgent run tabs', () => {
+    useTabStore.setState({
+      tabs: [{
+        sessionId: '__subagent__session-1__tool-1',
+        title: 'Kuhn',
+        type: 'subagent',
+        status: 'idle',
+        sourceSessionId: 'session-1',
+        subagentToolUseId: 'tool-1',
+      }],
+      activeTabId: '__subagent__session-1__tool-1',
+    })
+
+    render(<ContentRouter />)
+
+    expect(screen.getByTestId('subagent-run-page')).toHaveTextContent('session-1:tool-1:Kuhn')
+    expect(screen.queryByTestId('active-session')).not.toBeInTheDocument()
+  })
+
+  it('falls back to the empty session for malformed SubAgent tab metadata', () => {
+    useTabStore.setState({
+      tabs: [{
+        sessionId: '__subagent__session-1__tool-1',
+        title: 'Kuhn',
+        type: 'subagent',
+        status: 'idle',
+      }],
+      activeTabId: '__subagent__session-1__tool-1',
+    })
+
+    render(<ContentRouter />)
+
+    expect(screen.getByTestId('empty-session')).toBeInTheDocument()
+    expect(screen.queryByTestId('subagent-run-page')).not.toBeInTheDocument()
   })
 
   it('renders workbench tabs as main content instead of mounting the chat session surface', () => {

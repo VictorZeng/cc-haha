@@ -11,8 +11,9 @@ export const TRACE_LIST_TAB_ID = '__traces__'
 export const TERMINAL_TAB_PREFIX = '__terminal__'
 export const TRACE_TAB_PREFIX = '__trace__'
 export const WORKBENCH_TAB_PREFIX = '__workbench__'
+export const SUBAGENT_TAB_PREFIX = '__subagent__'
 
-export type TabType = 'session' | 'settings' | 'scheduled' | 'terminal' | 'trace' | 'traces' | 'workbench'
+export type TabType = 'session' | 'settings' | 'scheduled' | 'terminal' | 'trace' | 'traces' | 'workbench' | 'subagent'
 
 export type Tab = {
   sessionId: string
@@ -23,6 +24,8 @@ export type Tab = {
   terminalRuntimeId?: string
   traceSessionId?: string
   workbenchSessionId?: string
+  sourceSessionId?: string
+  subagentToolUseId?: string
 }
 
 type TabPersistence = {
@@ -39,6 +42,7 @@ type TabStore = {
   openTraceTab: (sessionId: string, title?: string) => string
   openTerminalTab: (cwd?: string, terminalRuntimeId?: string) => string
   openWorkbenchTab: (sessionId: string, title?: string) => string
+  openSubagentTab: (sourceSessionId: string, toolUseId: string, title?: string) => string
   closeTab: (sessionId: string) => void
   setActiveTab: (sessionId: string) => void
   updateTabTitle: (sessionId: string, title: string) => void
@@ -171,6 +175,29 @@ export const useTabStore = create<TabStore>((set, get) => ({
     return tabId
   },
 
+  openSubagentTab: (sourceSessionId, toolUseId, title = 'SubAgent') => {
+    const tabId = `${SUBAGENT_TAB_PREFIX}${sourceSessionId}__${toolUseId}`
+    const { tabs } = get()
+    const existing = tabs.find((tab) => tab.sessionId === tabId)
+    const tab: Tab = {
+      sessionId: tabId,
+      title,
+      type: 'subagent',
+      status: 'idle',
+      sourceSessionId,
+      subagentToolUseId: toolUseId,
+    }
+
+    set({
+      tabs: existing
+        ? tabs.map((current) => current.sessionId === tabId ? tab : current)
+        : [...tabs, tab],
+      activeTabId: tabId,
+    })
+    get().saveTabs()
+    return tabId
+  },
+
   closeTab: (sessionId) => {
     const { tabs, activeTabId } = get()
     const index = tabs.findIndex((t) => t.sessionId === sessionId)
@@ -240,7 +267,7 @@ export const useTabStore = create<TabStore>((set, get) => ({
 
   saveTabs: () => {
     const { tabs, activeTabId } = get()
-    const persistableTabs = tabs.filter((tab) => tab.type !== 'terminal' && tab.type !== 'workbench')
+    const persistableTabs = tabs.filter((tab) => tab.type !== 'terminal' && tab.type !== 'workbench' && tab.type !== 'subagent')
     const data: TabPersistence = {
       openTabs: persistableTabs.map((t) => ({
         sessionId: t.sessionId,
