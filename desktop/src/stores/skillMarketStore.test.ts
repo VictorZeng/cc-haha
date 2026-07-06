@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { skillMarketApi } from '../api/skillMarket'
 import type { SkillMarketDetail, SkillMarketItem } from '../types/skillMarket'
-import { useSkillMarketStore } from './skillMarketStore'
+import { skillMarketDetailKey, useSkillMarketStore } from './skillMarketStore'
 
 vi.mock('../api/skillMarket', () => ({
   skillMarketApi: {
@@ -40,10 +40,12 @@ function makeDetail(overrides: Partial<SkillMarketDetail> = {}): SkillMarketDeta
 describe('skillMarketStore', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    useSkillMarketStore.getState().clearDetailCache()
     useSkillMarketStore.setState({
       items: [],
       nextCursor: null,
       selectedDetail: null,
+      detailCache: {},
       source: 'auto',
       resolvedSource: null,
       sourceStatus: null,
@@ -53,6 +55,7 @@ describe('skillMarketStore', () => {
       isLoading: false,
       isLoadingMore: false,
       isDetailLoading: false,
+      loadingDetailKey: null,
       isInstalling: false,
       error: null,
     })
@@ -195,6 +198,71 @@ describe('skillMarketStore', () => {
     expect(useSkillMarketStore.getState().selectedDetail).toEqual(detail)
     expect(useSkillMarketStore.getState().isDetailLoading).toBe(false)
     expect(useSkillMarketStore.getState().error).toBeNull()
+  })
+
+  it('prefetches detail into cache without opening the drawer', async () => {
+    const detail = makeDetail()
+    mockedSkillMarketApi.detail.mockResolvedValue({ detail })
+
+    await useSkillMarketStore.getState().prefetchDetail('clawhub', 'skill-vetter')
+
+    expect(mockedSkillMarketApi.detail).toHaveBeenCalledWith('clawhub', 'skill-vetter')
+    expect(useSkillMarketStore.getState().selectedDetail).toBeNull()
+    expect(useSkillMarketStore.getState().isDetailLoading).toBe(false)
+    expect(useSkillMarketStore.getState().detailCache[skillMarketDetailKey('clawhub', 'skill-vetter')]).toEqual(detail)
+  })
+
+  it('deduplicates repeated detail prefetch requests', async () => {
+    let resolveDetail: ((value: { detail: SkillMarketDetail }) => void) | undefined
+    const detail = makeDetail()
+    mockedSkillMarketApi.detail.mockReturnValue(new Promise((resolve) => {
+      resolveDetail = resolve
+    }))
+
+    const first = useSkillMarketStore.getState().prefetchDetail('clawhub', 'skill-vetter')
+    const second = useSkillMarketStore.getState().prefetchDetail('clawhub', 'skill-vetter')
+    expect(mockedSkillMarketApi.detail).toHaveBeenCalledTimes(1)
+
+    resolveDetail?.({ detail })
+    await Promise.all([first, second])
+
+    expect(useSkillMarketStore.getState().detailCache[skillMarketDetailKey('clawhub', 'skill-vetter')]).toEqual(detail)
+  })
+
+  it('opens cached detail without another detail request', async () => {
+    const detail = makeDetail()
+    useSkillMarketStore.setState({
+      detailCache: {
+        [skillMarketDetailKey('clawhub', 'skill-vetter')]: detail,
+      },
+    })
+
+    await useSkillMarketStore.getState().fetchDetail('clawhub', 'skill-vetter')
+
+    expect(mockedSkillMarketApi.detail).not.toHaveBeenCalled()
+    expect(useSkillMarketStore.getState().selectedDetail).toEqual(detail)
+    expect(useSkillMarketStore.getState().isDetailLoading).toBe(false)
+    expect(useSkillMarketStore.getState().loadingDetailKey).toBeNull()
+  })
+
+  it('reuses an in-flight prefetch when opening detail', async () => {
+    let resolveDetail: ((value: { detail: SkillMarketDetail }) => void) | undefined
+    const detail = makeDetail()
+    mockedSkillMarketApi.detail.mockReturnValue(new Promise((resolve) => {
+      resolveDetail = resolve
+    }))
+
+    const prefetch = useSkillMarketStore.getState().prefetchDetail('clawhub', 'skill-vetter')
+    const open = useSkillMarketStore.getState().fetchDetail('clawhub', 'skill-vetter')
+    expect(mockedSkillMarketApi.detail).toHaveBeenCalledTimes(1)
+    expect(useSkillMarketStore.getState().loadingDetailKey).toBe(skillMarketDetailKey('clawhub', 'skill-vetter'))
+
+    resolveDetail?.({ detail })
+    await Promise.all([prefetch, open])
+
+    expect(useSkillMarketStore.getState().selectedDetail).toEqual(detail)
+    expect(useSkillMarketStore.getState().isDetailLoading).toBe(false)
+    expect(useSkillMarketStore.getState().loadingDetailKey).toBeNull()
   })
 
   it('ignores stale marketplace detail responses', async () => {

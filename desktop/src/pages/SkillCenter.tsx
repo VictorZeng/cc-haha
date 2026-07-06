@@ -22,14 +22,17 @@ import {
 } from 'lucide-react'
 import { SkillList } from '../components/skills/SkillList'
 import { SkillDetail } from '../components/skills/SkillDetail'
+import { MarkdownRenderer } from '../components/markdown/MarkdownRenderer'
+import { CodeViewer } from '../components/chat/CodeViewer'
 import { ConfirmDialog } from '../components/shared/ConfirmDialog'
 import { useTranslation } from '../i18n'
 import { formatBytes } from '../lib/formatBytes'
 import { useSessionStore } from '../stores/sessionStore'
-import { useSkillMarketStore } from '../stores/skillMarketStore'
+import { skillMarketDetailKey, useSkillMarketStore } from '../stores/skillMarketStore'
 import { useSkillStore } from '../stores/skillStore'
 import type {
   SkillMarketDetail,
+  SkillMarketFilePreview,
   SkillMarketInstallEligibility,
   SkillMarketItem,
   SkillMarketListSource,
@@ -46,6 +49,7 @@ const SOURCE_OPTIONS: SkillMarketListSource[] = ['auto', 'clawhub', 'skillhub']
 const SORT_OPTIONS: SkillMarketSort[] = ['downloads', 'installs', 'stars', 'updated', 'trending']
 const FILTER_OPTIONS: MarketFilter[] = ['all', 'safe', 'popular', 'installed', 'apiKey']
 const TRUST_SAFE: SkillMarketTrustState[] = ['clean', 'benign', 'signed', 'official']
+const VISIBLE_DETAIL_PREFETCH_LIMIT = 3
 
 export function SkillCenter() {
   const t = useTranslation()
@@ -65,6 +69,7 @@ export function SkillCenter() {
     items,
     nextCursor,
     selectedDetail,
+    loadingDetailKey,
     source,
     resolvedSource,
     sourceStatus,
@@ -82,6 +87,7 @@ export function SkillCenter() {
     fetchItems,
     fetchMore,
     fetchDetail,
+    prefetchDetail,
     installSelected,
     clearDetail,
   } = useSkillMarketStore()
@@ -109,6 +115,17 @@ export function SkillCenter() {
     () => items.filter((item) => matchesMarketFilter(item, marketFilter)),
     [items, marketFilter],
   )
+  const activeMarketDetailKey = selectedDetail
+    ? skillMarketDetailKey(selectedDetail.source, selectedDetail.slug)
+    : loadingDetailKey
+
+  useEffect(() => {
+    if (activeTab !== 'marketplace' || isLoading || filteredItems.length === 0) return
+
+    for (const item of filteredItems.slice(0, VISIBLE_DETAIL_PREFETCH_LIMIT)) {
+      void prefetchDetail(item.source, item.slug)
+    }
+  }, [activeTab, filteredItems, isLoading, prefetchDetail])
 
   const handleSearch = (event?: FormEvent<HTMLFormElement>) => {
     event?.preventDefault()
@@ -313,8 +330,9 @@ export function SkillCenter() {
                         <SkillMarketCard
                           key={`${item.source}-${item.slug}`}
                           item={item}
-                          active={selectedDetail?.source === item.source && selectedDetail.slug === item.slug}
+                          active={activeMarketDetailKey === skillMarketDetailKey(item.source, item.slug)}
                           onSelect={() => void fetchDetail(item.source, item.slug)}
+                          onPrefetch={() => void prefetchDetail(item.source, item.slug)}
                         />
                       ))}
                     </div>
@@ -573,10 +591,12 @@ function SkillMarketCard({
   item,
   active,
   onSelect,
+  onPrefetch,
 }: {
   item: SkillMarketItem
   active: boolean
   onSelect: () => void
+  onPrefetch: () => void
 }) {
   const t = useTranslation()
   const stats = formatStats(item, t)
@@ -588,6 +608,8 @@ function SkillMarketCard({
       type="button"
       aria-label={item.displayName}
       onClick={onSelect}
+      onPointerEnter={onPrefetch}
+      onFocus={onPrefetch}
       className={[
         'group flex min-h-[124px] flex-col rounded-lg border bg-[var(--color-surface)] p-3 text-left transition-[border-color,background-color,box-shadow,transform] duration-200 ease-out active:translate-y-px',
         'hover:border-[var(--color-border-focus)] hover:bg-[var(--color-surface-hover)] hover:shadow-sm',
@@ -911,6 +933,7 @@ function SkillMarketDetailPanel({
 
 function FilePreviewSection({ detail }: { detail: SkillMarketDetail }) {
   const t = useTranslation()
+  const [selectedPath, setSelectedPath] = useState<string | null>(null)
   const previews = detail.filePreviews?.length
     ? detail.filePreviews
     : detail.entryPreview
@@ -920,6 +943,7 @@ function FilePreviewSection({ detail }: { detail: SkillMarketDetail }) {
           language: 'markdown',
         }]
       : []
+  const activePreview = previews.find((preview) => preview.path === selectedPath) ?? previews[0]
 
   if (previews.length === 0) {
     if (!detail.previewUnavailableReason) {
@@ -938,42 +962,84 @@ function FilePreviewSection({ detail }: { detail: SkillMarketDetail }) {
     )
   }
 
+  if (!activePreview) {
+    return null
+  }
+
   return (
-    <div>
-      <div className="space-y-3">
-        {previews.map((preview) => (
-          <section
-            key={preview.path}
-            className="overflow-hidden rounded-md border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)]"
-          >
-            <div className="flex min-h-9 items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)] px-3 text-xs">
-              <span className="min-w-0 flex-1 truncate font-medium text-[var(--color-text-primary)]">
-                {preview.path}
-              </span>
-              {preview.language ? (
-                <span className="shrink-0 rounded bg-[var(--color-surface-container-high)] px-1.5 py-0.5 text-[11px] text-[var(--color-text-tertiary)]">
-                  {preview.language}
-                </span>
-              ) : null}
-              {typeof preview.size === 'number' ? (
-                <span className="shrink-0 text-[11px] text-[var(--color-text-tertiary)]">
-                  {formatBytes(preview.size)}
-                </span>
-              ) : null}
-              {preview.truncated ? (
-                <span className="shrink-0 rounded bg-[var(--color-warning-container)] px-1.5 py-0.5 text-[11px] text-[var(--color-warning)]">
-                  {t('skillCenter.marketplace.previewTruncated')}
-                </span>
-              ) : null}
-            </div>
-            <pre className="max-h-72 overflow-auto p-3 text-xs leading-5 text-[var(--color-text-secondary)]">
-              <code>{preview.content}</code>
-            </pre>
-          </section>
-        ))}
+    <div className="overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-container-lowest)]">
+      <div className="flex min-h-10 gap-1 overflow-x-auto border-b border-[var(--color-border)] bg-[var(--color-surface-container-low)] p-1.5">
+        {previews.map((preview) => {
+          const active = preview.path === activePreview.path
+          return (
+            <button
+              key={preview.path}
+              type="button"
+              onClick={() => setSelectedPath(preview.path)}
+              className={[
+                'max-w-[220px] shrink-0 truncate rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-border-focus)]',
+                active
+                  ? 'bg-[var(--color-surface)] text-[var(--color-text-primary)] shadow-sm'
+                  : 'text-[var(--color-text-tertiary)] hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-text-primary)]',
+              ].join(' ')}
+            >
+              {preview.path}
+            </button>
+          )
+        })}
+      </div>
+      <div className="flex min-h-9 flex-wrap items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-xs">
+        <span className="min-w-0 flex-1 truncate font-medium text-[var(--color-text-primary)]">
+          {activePreview.path}
+        </span>
+        {activePreview.language ? (
+          <span className="shrink-0 rounded bg-[var(--color-surface-container-high)] px-1.5 py-0.5 text-[11px] text-[var(--color-text-tertiary)]">
+            {normalizePreviewLanguage(activePreview.language)}
+          </span>
+        ) : null}
+        {typeof activePreview.size === 'number' ? (
+          <span className="shrink-0 text-[11px] text-[var(--color-text-tertiary)]">
+            {formatBytes(activePreview.size)}
+          </span>
+        ) : null}
+        {activePreview.truncated ? (
+          <span className="shrink-0 rounded bg-[var(--color-warning-container)] px-1.5 py-0.5 text-[11px] text-[var(--color-warning)]">
+            {t('skillCenter.marketplace.previewTruncated')}
+          </span>
+        ) : null}
+      </div>
+      <div className="max-h-[460px] overflow-auto bg-[var(--color-surface-container-lowest)]">
+        {isMarkdownPreview(activePreview) ? (
+          <MarkdownRenderer
+            content={activePreview.content}
+            variant="compact"
+            className="max-w-none px-4 py-3"
+          />
+        ) : (
+          <div className="p-3">
+            <CodeViewer
+              code={activePreview.content}
+              language={normalizePreviewLanguage(activePreview.language)}
+              maxLines={9999}
+              showLineNumbers
+              wrapLongLines
+            />
+          </div>
+        )}
       </div>
     </div>
   )
+}
+
+function isMarkdownPreview(preview: SkillMarketFilePreview): boolean {
+  const language = normalizePreviewLanguage(preview.language)
+  const path = preview.path.toLowerCase()
+  return language === 'markdown' || path.endsWith('.md') || path.endsWith('.mdx')
+}
+
+function normalizePreviewLanguage(language: string | undefined): string | undefined {
+  if (language === 'shell') return 'bash'
+  return language
 }
 
 function DrawerSection({ title, children }: { title: string; children: ReactNode }) {

@@ -13,6 +13,7 @@ type SkillMarketStore = {
   items: SkillMarketItem[]
   nextCursor: string | null
   selectedDetail: SkillMarketDetail | null
+  detailCache: Record<string, SkillMarketDetail>
   source: SkillMarketListSource
   resolvedSource: SkillMarketSource | null
   sourceStatus: SkillMarketListResponse['sourceStatus'] | null
@@ -22,6 +23,7 @@ type SkillMarketStore = {
   isLoading: boolean
   isLoadingMore: boolean
   isDetailLoading: boolean
+  loadingDetailKey: string | null
   isInstalling: boolean
   error: string | null
   setSource: (source: SkillMarketListSource) => void
@@ -29,18 +31,27 @@ type SkillMarketStore = {
   setQuery: (query: string) => void
   fetchItems: (options?: { query?: string }) => Promise<void>
   fetchMore: () => Promise<void>
-  fetchDetail: (source: SkillMarketSource, slug: string) => Promise<void>
+  fetchDetail: (source: SkillMarketSource, slug: string, options?: { force?: boolean }) => Promise<void>
+  prefetchDetail: (source: SkillMarketSource, slug: string) => Promise<void>
   installSelected: () => Promise<void>
   clearDetail: () => void
+  clearDetailCache: () => void
 }
 
 let detailRequestSeq = 0
+const detailInFlightRequests = new Map<string, Promise<SkillMarketDetail>>()
 const MARKET_PAGE_LIMIT = 100
+const DETAIL_CACHE_MAX_ENTRIES = 50
+
+export function skillMarketDetailKey(source: SkillMarketSource, slug: string): string {
+  return `${source}:${slug}`
+}
 
 export const useSkillMarketStore = create<SkillMarketStore>((set, get) => ({
   items: [],
   nextCursor: null,
   selectedDetail: null,
+  detailCache: {},
   source: 'auto',
   resolvedSource: null,
   sourceStatus: null,
@@ -50,16 +61,17 @@ export const useSkillMarketStore = create<SkillMarketStore>((set, get) => ({
   isLoading: false,
   isLoadingMore: false,
   isDetailLoading: false,
+  loadingDetailKey: null,
   isInstalling: false,
   error: null,
 
   setSource: (source) => {
     detailRequestSeq += 1
-    set({ source, selectedDetail: null, nextCursor: null, isDetailLoading: false, statusMessage: null })
+    set({ source, selectedDetail: null, nextCursor: null, isDetailLoading: false, loadingDetailKey: null, statusMessage: null })
   },
   setSort: (sort) => {
     detailRequestSeq += 1
-    set({ sort, selectedDetail: null, nextCursor: null, isDetailLoading: false, statusMessage: null })
+    set({ sort, selectedDetail: null, nextCursor: null, isDetailLoading: false, loadingDetailKey: null, statusMessage: null })
   },
   setQuery: (query) => set({ query }),
 
@@ -67,7 +79,7 @@ export const useSkillMarketStore = create<SkillMarketStore>((set, get) => ({
     const { source, sort, query } = get()
     const requestedQuery = options?.query ?? query
     detailRequestSeq += 1
-    set({ isLoading: true, isLoadingMore: false, isDetailLoading: false, selectedDetail: null, error: null })
+    set({ isLoading: true, isLoadingMore: false, isDetailLoading: false, loadingDetailKey: null, selectedDetail: null, error: null })
     try {
       const result = await skillMarketApi.list({
         source,
@@ -121,20 +133,50 @@ export const useSkillMarketStore = create<SkillMarketStore>((set, get) => ({
     }
   },
 
-  fetchDetail: async (source, slug) => {
+  fetchDetail: async (source, slug, options) => {
+    const cacheKey = skillMarketDetailKey(source, slug)
     const requestId = detailRequestSeq + 1
     detailRequestSeq = requestId
-    set({ isDetailLoading: true, selectedDetail: null, error: null })
+    const cachedDetail = options?.force ? undefined : get().detailCache[cacheKey]
+    if (cachedDetail) {
+      set({
+        selectedDetail: cachedDetail,
+        isDetailLoading: false,
+        loadingDetailKey: null,
+        error: null,
+      })
+      return
+    }
+
+    set({ isDetailLoading: true, loadingDetailKey: cacheKey, selectedDetail: null, error: null })
     try {
-      const { detail } = await skillMarketApi.detail(source, slug)
+      const detail = await loadDetail(source, slug, options)
+      set((state) => ({
+        detailCache: cacheDetail(state.detailCache, cacheKey, detail),
+      }))
       if (requestId !== detailRequestSeq) return
-      set({ selectedDetail: detail, isDetailLoading: false })
+      set({ selectedDetail: detail, isDetailLoading: false, loadingDetailKey: null })
     } catch (err) {
       if (requestId !== detailRequestSeq) return
       set({
         isDetailLoading: false,
+        loadingDetailKey: null,
         error: getErrorMessage(err),
       })
+    }
+  },
+
+  prefetchDetail: async (source, slug) => {
+    const cacheKey = skillMarketDetailKey(source, slug)
+    if (get().detailCache[cacheKey]) return
+
+    try {
+      const detail = await loadDetail(source, slug)
+      set((state) => ({
+        detailCache: cacheDetail(state.detailCache, cacheKey, detail),
+      }))
+    } catch {
+      // Prefetch is opportunistic; the explicit detail open will report failures.
     }
   },
 
@@ -146,7 +188,7 @@ export const useSkillMarketStore = create<SkillMarketStore>((set, get) => ({
     try {
       await skillMarketApi.install(detail.source, detail.slug, detail.version)
       await get().fetchItems()
-      await get().fetchDetail(detail.source, detail.slug)
+      await get().fetchDetail(detail.source, detail.slug, { force: true })
       set({ isInstalling: false })
     } catch (err) {
       set({
@@ -158,9 +200,53 @@ export const useSkillMarketStore = create<SkillMarketStore>((set, get) => ({
 
   clearDetail: () => {
     detailRequestSeq += 1
-    set({ selectedDetail: null, isDetailLoading: false })
+    set({ selectedDetail: null, isDetailLoading: false, loadingDetailKey: null })
+  },
+
+  clearDetailCache: () => {
+    detailInFlightRequests.clear()
+    set({ detailCache: {} })
   },
 }))
+
+function loadDetail(
+  source: SkillMarketSource,
+  slug: string,
+  options?: { force?: boolean },
+): Promise<SkillMarketDetail> {
+  const cacheKey = skillMarketDetailKey(source, slug)
+  if (!options?.force) {
+    const pending = detailInFlightRequests.get(cacheKey)
+    if (pending) return pending
+  }
+
+  const request = skillMarketApi.detail(source, slug)
+    .then(({ detail }) => detail)
+    .finally(() => {
+      if (detailInFlightRequests.get(cacheKey) === request) {
+        detailInFlightRequests.delete(cacheKey)
+      }
+    })
+
+  detailInFlightRequests.set(cacheKey, request)
+  return request
+}
+
+function cacheDetail(
+  current: Record<string, SkillMarketDetail>,
+  key: string,
+  detail: SkillMarketDetail,
+): Record<string, SkillMarketDetail> {
+  const next = { ...current, [key]: detail }
+  const keys = Object.keys(next)
+  while (keys.length > DETAIL_CACHE_MAX_ENTRIES) {
+    const oldestKey = keys.shift()
+    if (oldestKey) {
+      delete next[oldestKey]
+    }
+  }
+  return next
+}
 
 function mergeMarketItems(current: SkillMarketItem[], incoming: SkillMarketItem[]): SkillMarketItem[] {
   const seen = new Set(current.map((item) => `${item.source}:${item.slug}`))

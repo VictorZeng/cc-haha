@@ -841,6 +841,87 @@ describe('skill market service source selection', () => {
     })
   })
 
+  it('caches remote detail previews without caching installed eligibility', async () => {
+    const fetchCalls: string[] = []
+    let installedSkillNames = new Set<string>()
+    const service = createSkillMarketService({
+      fetchImpl: async (url) => {
+        const urlString = String(url)
+        fetchCalls.push(urlString)
+        if (urlString.endsWith('/scan')) {
+          return Response.json(CLAWHUB_NESTED_SCAN_RESPONSE)
+        }
+        if (urlString.endsWith('/versions/1.0.0')) {
+          return Response.json(CLAWHUB_VERSION_RESPONSE)
+        }
+        if (urlString.includes('/file?path=SKILL.md')) {
+          return new Response('# Skill Vetter\n\nallowed-tools: Bash\n')
+        }
+        if (urlString.includes('/file?path=scripts%2Faudit.py') || urlString.includes('/file?path=scripts/audit.py')) {
+          return new Response('print("audit")\n')
+        }
+        return Response.json(CLAWHUB_DETAIL_RESPONSE)
+      },
+      installedSkillNames: async () => installedSkillNames,
+      now: () => 50_000,
+    })
+
+    const first = await service.getDetail({ source: 'clawhub', slug: 'skill-vetter' })
+    installedSkillNames = new Set(['skill-vetter'])
+    const second = await service.getDetail({ source: 'clawhub', slug: 'skill-vetter' })
+
+    expect(fetchCalls).toHaveLength(5)
+    expect(first).toMatchObject({
+      installed: false,
+      installEligibility: { status: 'installable' },
+      filePreviews: [
+        { path: 'SKILL.md', content: expect.stringContaining('# Skill Vetter') },
+        { path: 'scripts/audit.py', content: expect.stringContaining('print("audit")') },
+      ],
+    })
+    expect(second).toMatchObject({
+      installed: true,
+      installEligibility: {
+        status: 'installed',
+        installedSkillName: 'skill-vetter',
+      },
+    })
+  })
+
+  it('coalesces concurrent detail requests for the same skill', async () => {
+    const fetchCalls: string[] = []
+    const service = createSkillMarketService({
+      fetchImpl: async (url) => {
+        const urlString = String(url)
+        fetchCalls.push(urlString)
+        if (urlString.endsWith('/scan')) {
+          return Response.json(CLAWHUB_NESTED_SCAN_RESPONSE)
+        }
+        if (urlString.endsWith('/versions/1.0.0')) {
+          return Response.json(CLAWHUB_VERSION_RESPONSE)
+        }
+        if (urlString.includes('/file?path=SKILL.md')) {
+          return new Response('# Skill Vetter\n')
+        }
+        if (urlString.includes('/file?path=scripts%2Faudit.py') || urlString.includes('/file?path=scripts/audit.py')) {
+          return new Response('print("audit")\n')
+        }
+        return Response.json(CLAWHUB_DETAIL_RESPONSE)
+      },
+      installedSkillNames: async () => new Set(),
+      now: () => 60_000,
+    })
+
+    const [first, second] = await Promise.all([
+      service.getDetail({ source: 'clawhub', slug: 'skill-vetter' }),
+      service.getDetail({ source: 'clawhub', slug: 'skill-vetter' }),
+    ])
+
+    expect(fetchCalls).toHaveLength(5)
+    expect(first?.slug).toBe('skill-vetter')
+    expect(second?.slug).toBe('skill-vetter')
+  })
+
   it('blocks uninstalled detail installs when only list-level ClawHub metadata is available', async () => {
     const fetchCalls: string[] = []
     const service = createSkillMarketService({
@@ -857,7 +938,8 @@ describe('skill market service source selection', () => {
     const detail = await service.getDetail({ source: 'clawhub', slug: 'skill-vetter' })
 
     expect(fetchCalls[0]).toBe('https://clawhub.ai/api/v1/skills/skill-vetter')
-    expect(fetchCalls[1]).toContain('https://clawhub.ai/api/v1/skills?')
+    expect(fetchCalls[1]).toBe('https://clawhub.ai/api/v1/skills/skill-vetter/scan')
+    expect(fetchCalls[2]).toContain('https://clawhub.ai/api/v1/skills?')
     expect(detail).toMatchObject({
       source: 'clawhub',
       slug: 'skill-vetter',
@@ -1020,6 +1102,24 @@ describe('skill market API', () => {
     const res = await handleSkillMarketApi(req, url, ['api', 'skill-market'])
 
     expect(res.status).toBe(405)
+  })
+
+  it('reuses the default service cache across list API requests', async () => {
+    const fetchCalls: string[] = []
+    globalThis.fetch = (async (url) => {
+      fetchCalls.push(String(url))
+      return Response.json(CLAWHUB_TOP_SKILLS_RESPONSE)
+    }) as typeof fetch
+    const url = new URL('/api/skill-market?source=clawhub&limit=12&q=vetter', 'http://localhost:3456')
+
+    const first = await handleSkillMarketApi(new Request(url, { method: 'GET' }), url, ['api', 'skill-market'])
+    const second = await handleSkillMarketApi(new Request(url, { method: 'GET' }), url, ['api', 'skill-market'])
+
+    expect(first.status).toBe(200)
+    expect(second.status).toBe(200)
+    expect(fetchCalls).toHaveLength(1)
+    await expect(first.json()).resolves.toMatchObject({ sourceStatus: 'ok' })
+    await expect(second.json()).resolves.toMatchObject({ sourceStatus: 'cached' })
   })
 
   it('rejects install requests with target paths', async () => {

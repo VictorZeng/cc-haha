@@ -21,13 +21,35 @@ vi.mock('../components/skills/SkillList', () => ({
 }))
 
 vi.mock('../components/markdown/MarkdownRenderer', () => ({
-  MarkdownRenderer: ({ content }: { content: string }) => (
-    <div data-testid="markdown-renderer">{content}</div>
+  MarkdownRenderer: ({ content, variant }: { content: string; variant?: string }) => (
+    <div data-testid="markdown-renderer" data-variant={variant}>{content}</div>
   ),
 }))
 
 vi.mock('../components/chat/CodeViewer', () => ({
-  CodeViewer: ({ code }: { code: string }) => <div data-testid="code-viewer">{code}</div>,
+  CodeViewer: ({
+    code,
+    language,
+    maxLines,
+    showLineNumbers,
+    wrapLongLines,
+  }: {
+    code: string
+    language?: string
+    maxLines?: number
+    showLineNumbers?: boolean
+    wrapLongLines?: boolean
+  }) => (
+    <div
+      data-testid="code-viewer"
+      data-language={language}
+      data-max-lines={maxLines}
+      data-show-line-numbers={showLineNumbers ? 'true' : 'false'}
+      data-wrap-long-lines={wrapLongLines ? 'true' : 'false'}
+    >
+      {code}
+    </div>
+  ),
 }))
 
 const mockedSkillMarketApi = vi.mocked(skillMarketApi)
@@ -74,10 +96,12 @@ function makeDetail(overrides: Partial<SkillMarketDetail> = {}): SkillMarketDeta
 describe('SkillCenter', () => {
   beforeEach(() => {
     useSettingsStore.setState({ locale: 'en' })
+    useSkillMarketStore.getState().clearDetailCache()
     useSkillMarketStore.setState({
       items: [],
       nextCursor: null,
       selectedDetail: null,
+      detailCache: {},
       source: 'auto',
       resolvedSource: null,
       sourceStatus: null,
@@ -87,6 +111,7 @@ describe('SkillCenter', () => {
       isLoading: false,
       isLoadingMore: false,
       isDetailLoading: false,
+      loadingDetailKey: null,
       isInstalling: false,
       error: null,
     })
@@ -119,10 +144,12 @@ describe('SkillCenter', () => {
     cleanup()
     vi.clearAllMocks()
     useSettingsStore.setState({ locale: 'en' })
+    useSkillMarketStore.getState().clearDetailCache()
     useSkillMarketStore.setState({
       items: [],
       nextCursor: null,
       selectedDetail: null,
+      detailCache: {},
       source: 'auto',
       resolvedSource: null,
       sourceStatus: null,
@@ -132,6 +159,7 @@ describe('SkillCenter', () => {
       isLoading: false,
       isLoadingMore: false,
       isDetailLoading: false,
+      loadingDetailKey: null,
       isInstalling: false,
       error: null,
     })
@@ -172,7 +200,7 @@ describe('SkillCenter', () => {
     expect(screen.getByRole('button', { name: 'Install' })).toBeEnabled()
     expect(screen.getByText('Open upstream')).toHaveAttribute('href', 'https://github.com/example/ppt-generator')
     expect(screen.getByText('File preview')).toBeInTheDocument()
-    expect(screen.getByText('SKILL.md')).toBeInTheDocument()
+    expect(screen.getAllByText('SKILL.md').length).toBeGreaterThan(0)
 
     fireEvent.click(screen.getByRole('button', { name: 'Install' }))
     expect(mockedSkillMarketApi.install).not.toHaveBeenCalled()
@@ -232,6 +260,35 @@ describe('SkillCenter', () => {
     expect(within(weatherCard).getByText('Installed')).toBeInTheDocument()
     expect(within(crmCard).getByText('API key')).toBeInTheDocument()
     expect(within(vetterCard).getByText(/260\.9K|260,960/)).toBeInTheDocument()
+  })
+
+  it('prefetches visible details and warms a focused marketplace card without opening the drawer', async () => {
+    mockedSkillMarketApi.list.mockResolvedValue({
+      items: [
+        makeItem({ slug: 'alpha', displayName: 'Alpha Skill' }),
+        makeItem({ slug: 'bravo', displayName: 'Bravo Skill' }),
+        makeItem({ slug: 'charlie', displayName: 'Charlie Skill' }),
+        makeItem({ slug: 'delta', displayName: 'Delta Skill' }),
+      ],
+      nextCursor: null,
+      source: 'clawhub',
+      sourceStatus: 'ok',
+    })
+
+    render(<SkillCenter />)
+
+    const deltaCard = await screen.findByRole('button', { name: 'Delta Skill' })
+    await waitFor(() => {
+      expect(mockedSkillMarketApi.detail).toHaveBeenCalledTimes(3)
+    })
+    mockedSkillMarketApi.detail.mockClear()
+
+    fireEvent.focus(deltaCard)
+
+    await waitFor(() => {
+      expect(mockedSkillMarketApi.detail).toHaveBeenCalledWith('clawhub', 'delta')
+    })
+    expect(screen.queryByTestId('skill-market-detail-layer')).not.toBeInTheDocument()
   })
 
   it('uses marketplace-shaped loading skeletons while the catalog loads', () => {
@@ -311,10 +368,10 @@ describe('SkillCenter', () => {
     expect(within(dialog).getByRole('button', { name: 'Blocked' })).toBeDisabled()
     expect(within(dialog).getByText(/full package safety scan/i)).toBeInTheDocument()
     expect(within(dialog).getByText('File preview')).toBeInTheDocument()
-    expect(within(dialog).getByText('SKILL.md')).toBeInTheDocument()
+    expect(within(dialog).getAllByText('SKILL.md').length).toBeGreaterThan(0)
   })
 
-  it('renders raw Markdown and Python previews for an uninstalled marketplace skill', async () => {
+  it('renders Markdown and Python previews with the existing rich preview components', async () => {
     mockedSkillMarketApi.detail.mockResolvedValue({
       detail: makeDetail({
         files: [
@@ -344,9 +401,16 @@ describe('SkillCenter', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'PPT Generator' }))
 
     expect(await screen.findByText('File preview')).toBeInTheDocument()
+    expect(screen.getByTestId('markdown-renderer')).toHaveAttribute('data-variant', 'compact')
+    expect(screen.getByTestId('markdown-renderer')).toHaveTextContent('Use this before install.')
     expect(screen.getByText('scripts/audit.py')).toBeInTheDocument()
-    expect(screen.getByText('python')).toBeInTheDocument()
-    expect(screen.getByText(/print\("audit"\)/)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'scripts/audit.py' }))
+    const codePreview = screen.getByTestId('code-viewer')
+    expect(codePreview).toHaveAttribute('data-language', 'python')
+    expect(codePreview).toHaveAttribute('data-max-lines', '9999')
+    expect(codePreview).toHaveAttribute('data-show-line-numbers', 'true')
+    expect(codePreview).toHaveAttribute('data-wrap-long-lines', 'true')
+    expect(codePreview).toHaveTextContent('print("audit")')
     expect(screen.getByText('Scripts')).toBeInTheDocument()
     expect(screen.getByText('Executables')).toBeInTheDocument()
   })

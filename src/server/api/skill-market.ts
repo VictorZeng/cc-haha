@@ -34,13 +34,16 @@ const PACKAGE_URL_FIELDS = [
 ] as const
 
 let skillMarketServiceFactory: SkillMarketServiceFactory = createSkillMarketService
+let defaultSkillMarketService: SkillMarketService | null = null
 
 export function setSkillMarketServiceFactoryForTests(factory: SkillMarketServiceFactory): void {
   skillMarketServiceFactory = factory
+  defaultSkillMarketService = null
 }
 
 export function resetSkillMarketServiceFactoryForTests(): void {
   skillMarketServiceFactory = createSkillMarketService
+  defaultSkillMarketService = null
 }
 
 export async function handleSkillMarketApi(
@@ -56,9 +59,7 @@ export async function handleSkillMarketApi(
       return params
     }
 
-    const service = skillMarketServiceFactory({
-      installedSkillNames: collectUserSkillNames,
-    })
+    const service = getSkillMarketService()
     const result = await service.list(params)
     return Response.json(result)
   }
@@ -91,9 +92,7 @@ async function handleDetail(req: Request, segments: string[], sourceSegment: str
     return jsonError('not_found', 'Skill market skill not found.', 404)
   }
 
-  const service = skillMarketServiceFactory({
-    installedSkillNames: collectUserSkillNames,
-  })
+  const service = getSkillMarketService()
   const detail = await service.getDetail({
     source: sourceSegment as SkillMarketSource,
     slug,
@@ -175,9 +174,7 @@ async function handleInstall(req: Request): Promise<Response> {
     return installRequest
   }
 
-  const service = skillMarketServiceFactory({
-    installedSkillNames: collectUserSkillNames,
-  })
+  const service = getSkillMarketService()
   const detail = await service.getDetail({
     source: installRequest.source,
     slug: installRequest.slug,
@@ -242,6 +239,19 @@ async function handleInstall(req: Request): Promise<Response> {
     }
     return jsonError('install_failed', errorMessage(error), 422, { detail })
   }
+}
+
+function getSkillMarketService(): SkillMarketService {
+  if (skillMarketServiceFactory !== createSkillMarketService) {
+    return skillMarketServiceFactory({
+      installedSkillNames: collectUserSkillNames,
+    })
+  }
+
+  defaultSkillMarketService ??= skillMarketServiceFactory({
+    installedSkillNames: collectUserSkillNames,
+  })
+  return defaultSkillMarketService
 }
 
 function parseInstallRequest(body: Record<string, unknown>): SkillMarketInstallRequest | Response {

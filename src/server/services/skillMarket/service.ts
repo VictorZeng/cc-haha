@@ -45,6 +45,7 @@ const SKILLHUB_SKILLS_URL = 'https://api.skillhub.cn/api/skills'
 const DEFAULT_LIMIT = 100
 const MAX_LIMIT = 100
 const CATALOG_CACHE_TTL_MS = 5 * 60 * 1_000
+const DETAIL_CACHE_TTL_MS = 10 * 60 * 1_000
 const FAILURE_CACHE_TTL_MS = 60 * 1_000
 const FILE_PREVIEW_LIMIT = 5
 const FILE_PREVIEW_MAX_BYTES = 96 * 1024
@@ -82,6 +83,11 @@ type CatalogCacheEntry = {
   result: SkillMarketListResult
 }
 
+type DetailCacheEntry = {
+  expiresAt: number
+  detail: SkillMarketDetail | null
+}
+
 type FailureCacheEntry = {
   expiresAt: number
   message: string
@@ -100,6 +106,8 @@ export function createSkillMarketService(options: SkillMarketServiceOptions = {}
   const installedSkillNames = options.installedSkillNames
   const now = options.now ?? Date.now
   const catalogCache = new Map<string, CatalogCacheEntry>()
+  const detailCache = new Map<string, DetailCacheEntry>()
+  const pendingDetailRequests = new Map<string, Promise<SkillMarketDetail | null>>()
   const failureCache = new Map<string, FailureCacheEntry>()
 
   async function listSkills(params: SkillMarketListParams = {}): Promise<SkillMarketListResult> {
@@ -233,33 +241,79 @@ export function createSkillMarketService(options: SkillMarketServiceOptions = {}
       return null
     }
 
-    if (params.source === 'clawhub') {
-      const installed = await resolveInstalledSkillNames(installedSkillNames)
+    const installed = await resolveInstalledSkillNames(installedSkillNames)
+    const baseDetail = await cachedDetail(detailCacheKey(params.source, slug), () => fetchBaseDetail(params.source, slug))
+    return baseDetail ? applyInstalledState(baseDetail, installed.has(slug)) : null
+  }
+
+  async function cachedDetail(
+    cacheKey: string,
+    loader: () => Promise<SkillMarketDetail | null>,
+  ): Promise<SkillMarketDetail | null> {
+    const cached = detailCache.get(cacheKey)
+    const currentTime = now()
+    if (cached && cached.expiresAt > currentTime) {
+      return cached.detail
+    }
+    if (cached) {
+      detailCache.delete(cacheKey)
+    }
+
+    const pending = pendingDetailRequests.get(cacheKey)
+    if (pending) {
+      return pending
+    }
+
+    const request = loader()
+      .then((detail) => {
+        detailCache.set(cacheKey, {
+          expiresAt: now() + (detail ? DETAIL_CACHE_TTL_MS : FAILURE_CACHE_TTL_MS),
+          detail,
+        })
+        return detail
+      })
+      .finally(() => {
+        pendingDetailRequests.delete(cacheKey)
+      })
+
+    pendingDetailRequests.set(cacheKey, request)
+    return request
+  }
+
+  async function fetchBaseDetail(source: SkillMarketSource, slug: string): Promise<SkillMarketDetail | null> {
+    if (source === 'clawhub') {
       try {
-        return await fetchClawHubDetail(slug, installed.has(slug))
+        return await fetchClawHubDetail(slug)
       } catch (error) {
         if (!(error instanceof SkillMarketRequestError)) {
           throw error
         }
       }
+
+      const list = await listClawHub({
+        source: 'clawhub',
+        query: slug,
+        limit: MAX_LIMIT,
+      })
+      const item = list.items.find((candidate) => candidate.source === source && candidate.slug === slug)
+      return item ? detailFromListItem(item) : null
     }
 
-    const list = await listSkills({
-      source: params.source,
+    const list = await listSkillHub({
+      source: 'skillhub',
       query: slug,
       limit: MAX_LIMIT,
     })
-    const item = list.items.find((candidate) => candidate.source === params.source && candidate.slug === slug)
-    if (!item) {
-      return null
-    }
-    return detailFromListItem(item)
+    const item = list.items.find((candidate) => candidate.source === source && candidate.slug === slug)
+    return item ? detailFromListItem(item) : null
   }
 
-  async function fetchClawHubDetail(slug: string, installed: boolean): Promise<SkillMarketDetail | null> {
-    const detailPayload = await requestJson(fetchImpl, clawHubDetailUrl(slug), 'ClawHub detail')
-    const scanPayload = await requestJson(fetchImpl, clawHubScanUrl(slug), 'ClawHub scan')
-    const detail = normalizeClawHubDetail(detailPayload, scanPayload, { installed })
+  async function fetchClawHubDetail(slug: string): Promise<SkillMarketDetail | null> {
+    const [detailPayload, scanPayload] = await Promise.all([
+      requestJson(fetchImpl, clawHubDetailUrl(slug), 'ClawHub detail'),
+      requestJson(fetchImpl, clawHubScanUrl(slug), 'ClawHub scan'),
+    ])
+    const detail = normalizeClawHubDetail(detailPayload, scanPayload, { installed: false })
     if (!detail) {
       return null
     }
@@ -302,24 +356,18 @@ export function createSkillMarketService(options: SkillMarketServiceOptions = {}
     version: string | undefined,
     files: SkillMarketFile[],
   ): Promise<SkillMarketFilePreview[]> {
-    const previews: SkillMarketFilePreview[] = []
-    for (const file of previewCandidateFiles(files)) {
+    const previews = await Promise.all(previewCandidateFiles(files).map(async (file) => {
       try {
         const content = await requestText(fetchImpl, clawHubFileUrl(slug, file.path, version), 'ClawHub file')
-        const preview = buildTextPreview(file, content)
-        if (preview) {
-          previews.push(preview)
-        }
+        return buildTextPreview(file, content)
       } catch (error) {
         if (!(error instanceof SkillMarketRequestError)) {
           throw error
         }
+        return null
       }
-      if (previews.length >= FILE_PREVIEW_LIMIT) {
-        break
-      }
-    }
-    return previews
+    }))
+    return previews.filter((preview): preview is SkillMarketFilePreview => preview !== null)
   }
 
   return {
@@ -338,6 +386,32 @@ function detailFromListItem(item: SkillMarketItem): SkillMarketDetail {
       : 'Marketplace detail did not include enough package metadata for file preview.',
     riskLabels: [],
     installEligibility: installEligibilityFromListItem(item),
+  }
+}
+
+function applyInstalledState(detail: SkillMarketDetail, installed: boolean): SkillMarketDetail {
+  if (installed) {
+    return {
+      ...detail,
+      installed: true,
+      installEligibility: {
+        status: 'installed',
+        installedSkillName: detail.slug,
+      },
+    }
+  }
+
+  if (!detail.installed) {
+    return detail
+  }
+
+  return {
+    ...detail,
+    installed: false,
+    installEligibility: installEligibilityFromListItem({
+      ...detail,
+      installed: false,
+    }),
   }
 }
 
@@ -412,6 +486,10 @@ function clawHubCatalogCacheKey(params: SkillMarketListParams): string {
 
 function catalogCacheKey(source: 'clawhub' | 'skillhub', url: URL): string {
   return `${source}:${url.toString()}`
+}
+
+function detailCacheKey(source: SkillMarketSource, slug: string): string {
+  return `${source}:${slug}`
 }
 
 function filterCatalogByQuery(result: SkillMarketListResult, query?: string): SkillMarketListResult {
