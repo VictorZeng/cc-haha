@@ -1004,6 +1004,7 @@ export const zh: Record<TranslationKey, string> = {
   'settings.general.effort.low': '低',
   'settings.general.effort.medium': '中',
   'settings.general.effort.high': '高',
+  'settings.general.effort.xhigh': '极高',
   'settings.general.effort.max': '最大',
   'settings.general.thinkingTitle': '思考模式',
   'settings.general.thinkingDescription': '控制新会话是否启用模型思考。关闭后，DeepSeek 等兼容供应商会收到显式非思考模式参数。',

@@ -333,6 +333,19 @@ describe('ConversationService', () => {
     ])
   })
 
+  it('should keep OpenAI-native reasoning controls out of Claude CLI args', () => {
+    const svc = new ConversationService()
+    expect((svc as any).getRuntimeArgs({
+      providerId: 'openai-official',
+      model: 'gpt-5.6-sol',
+      effort: 'xhigh',
+      thinking: 'disabled',
+    })).toEqual([
+      '--model',
+      'gpt-5.6-sol',
+    ])
+  })
+
   it('should send thinking token controls to active CLI sessions', () => {
     const svc = new ConversationService() as any
     const sent: string[] = []
@@ -4179,8 +4192,11 @@ describe('WebSocket Chat Integration', () => {
         sessionId,
         options: {
           providerId: 'openai-official',
+          model: 'gpt-5.6-sol',
+          effort: 'low',
         },
       })
+      expect(startCalls[0]?.options?.thinking).toBeUndefined()
       expect(messages.some((msg) => msg.type === 'message_complete')).toBe(true)
       await expect(providerService.listProviders()).resolves.toMatchObject({
         activeId: 'openai-official',
@@ -4191,6 +4207,100 @@ describe('WebSocket Chat Integration', () => {
       await providerService.activateOfficial()
     }
   }, 20_000)
+
+  it('should accept xhigh for GPT-5.6 and pass it to the OpenAI runtime', async () => {
+    const providerService = new ProviderService()
+    await providerService.activateProvider('openai-official')
+
+    const createRes = await fetch(`${baseUrl}/api/sessions`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ workDir: process.cwd() }),
+    })
+    const { sessionId } = await createRes.json() as { sessionId: string }
+    const originalStartSession = conversationService.startSession.bind(conversationService)
+    const startCalls: Array<{ options?: { model?: string; effort?: string; providerId?: string | null } }> = []
+    conversationService.startSession = (async function patchedStartSession(
+      sid: string,
+      workDir: string,
+      sdkUrl: string,
+      options?: { permissionMode?: string; model?: string; effort?: string; thinking?: 'enabled' | 'adaptive' | 'disabled'; providerId?: string | null },
+    ) {
+      startCalls.push({ options })
+      return originalStartSession(sid, workDir, sdkUrl, options)
+    }) as typeof conversationService.startSession
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(`${wsUrl}/ws/${sessionId}`)
+        const timeout = setTimeout(() => {
+          ws.close()
+          reject(new Error('Timed out waiting for GPT-5.6 xhigh runtime turn'))
+        }, 10_000)
+
+        ws.onmessage = (event) => {
+          const message = JSON.parse(event.data as string)
+          if (message.type === 'connected') {
+            ws.send(JSON.stringify({
+              type: 'set_runtime_config',
+              providerId: 'openai-official',
+              modelId: 'gpt-5.6-sol',
+              effortLevel: 'xhigh',
+            }))
+            ws.send(JSON.stringify({ type: 'user_message', content: 'use xhigh' }))
+          } else if (message.type === 'error') {
+            clearTimeout(timeout)
+            ws.close()
+            reject(new Error(message.message))
+          } else if (message.type === 'message_complete') {
+            clearTimeout(timeout)
+            ws.close()
+            resolve()
+          }
+        }
+        ws.onerror = () => reject(new Error('WebSocket failed for GPT-5.6 xhigh runtime'))
+      })
+
+      expect(startCalls[0]?.options).toMatchObject({
+        providerId: 'openai-official',
+        model: 'gpt-5.6-sol',
+        effort: 'xhigh',
+      })
+    } finally {
+      conversationService.startSession = originalStartSession
+      conversationService.stopSession(sessionId)
+      await providerService.activateOfficial()
+    }
+  }, 20_000)
+
+  it('should reject a reasoning effort that the selected ChatGPT model does not support', async () => {
+    const sessionId = `chat-openai-invalid-effort-${crypto.randomUUID()}`
+    await new Promise<void>((resolve, reject) => {
+      const ws = new WebSocket(`${wsUrl}/ws/${sessionId}`)
+      const timeout = setTimeout(() => {
+        ws.close()
+        reject(new Error('Timed out waiting for invalid OpenAI effort rejection'))
+      }, 5_000)
+
+      ws.onmessage = (event) => {
+        const message = JSON.parse(event.data as string)
+        if (message.type === 'connected') {
+          ws.send(JSON.stringify({
+            type: 'set_runtime_config',
+            providerId: 'openai-official',
+            modelId: 'gpt-5.5',
+            effortLevel: 'max',
+          }))
+        } else if (message.type === 'error') {
+          clearTimeout(timeout)
+          expect(message).toMatchObject({ code: 'RUNTIME_CONFIG_INVALID' })
+          ws.close()
+          resolve()
+        }
+      }
+      ws.onerror = () => reject(new Error('WebSocket failed for invalid OpenAI effort'))
+    })
+  }, 10_000)
 
   it('should resume streaming to a reconnected client during an active turn', async () => {
     await withMockStreamDelay(150, async () => {

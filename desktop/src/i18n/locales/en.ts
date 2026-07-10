@@ -1002,6 +1002,7 @@ export const en = {
   'settings.general.effort.low': 'Low',
   'settings.general.effort.medium': 'Medium',
   'settings.general.effort.high': 'High',
+  'settings.general.effort.xhigh': 'X-High',
   'settings.general.effort.max': 'Max',
   'settings.general.thinkingTitle': 'Thinking Mode',
   'settings.general.thinkingDescription': 'Controls whether new sessions start with model thinking enabled. When off, compatible providers such as DeepSeek receive an explicit non-thinking parameter.',

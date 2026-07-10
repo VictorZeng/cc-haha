@@ -1004,6 +1004,7 @@ export const kr: Record<TranslationKey, string> = {
   'settings.general.effort.low': '낮음',
   'settings.general.effort.medium': '보통',
   'settings.general.effort.high': '높음',
+  'settings.general.effort.xhigh': '매우 높음',
   'settings.general.effort.max': '최대',
   'settings.general.thinkingTitle': '사고 모드',
   'settings.general.thinkingDescription': '새 세션을 모델 사고를 사용으로 시작할지 제어합니다. 꺼져 있으면 DeepSeek 같은 호환 공급자에 명시적인 비사고 매개변수가 전달됩니다.',

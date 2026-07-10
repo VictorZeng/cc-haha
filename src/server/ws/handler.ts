@@ -18,6 +18,12 @@ import { sessionService } from '../services/sessionService.js'
 import { SettingsService } from '../services/settingsService.js'
 import { ProviderService } from '../services/providerService.js'
 import { isOpenAIOfficialProviderId } from '../services/openaiOfficialProvider.js'
+import { getOpenAICodexModelCatalog } from '../../services/openaiAuth/modelCatalog.js'
+import {
+  OPENAI_DEFAULT_MAIN_MODEL,
+  getOpenAIModelCatalogEntry,
+  isOpenAIReasoningEffort,
+} from '../../services/openaiAuth/models.js'
 import { diagnosticsService } from '../services/diagnosticsService.js'
 import {
   buildConversationTitleInput,
@@ -111,7 +117,7 @@ const prewarmPendingSessions = new Set<string>()
 const prewarmedSessions = new Set<string>()
 const prewarmIdleTimers = new Map<string, ReturnType<typeof setTimeout>>()
 const DEFAULT_PREWARM_IDLE_TIMEOUT_MS = 5 * 60_000
-const VALID_EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'max'])
+const VALID_CLAUDE_EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'max'])
 
 async function sendRepositoryStartupStatus(
   ws: ServerWebSocket<WebSocketData>,
@@ -795,7 +801,10 @@ async function handleSetRuntimeConfig(
   }
   const effortLevel =
     typeof message.effortLevel === 'string' ? message.effortLevel.trim() : undefined
-  if (effortLevel !== undefined && !VALID_EFFORT_LEVELS.has(effortLevel)) {
+  if (
+    effortLevel !== undefined &&
+    !(await isRuntimeEffortSupported(message.providerId, modelId, effortLevel))
+  ) {
     sendMessage(ws, {
       type: 'error',
       message: 'Runtime effort selection is invalid.',
@@ -2611,6 +2620,28 @@ type RuntimeSettings = {
   providerId?: string | null
 }
 
+async function getDefaultOpenAIReasoningEffort(modelId: string): Promise<string> {
+  const catalog = await getOpenAICodexModelCatalog()
+  return getOpenAIModelCatalogEntry(modelId, catalog)?.defaultReasoningEffort ?? 'medium'
+}
+
+async function isRuntimeEffortSupported(
+  providerId: string | null | undefined,
+  modelId: string,
+  effort: string,
+): Promise<boolean> {
+  if (!isOpenAIOfficialProviderId(providerId)) {
+    return VALID_CLAUDE_EFFORT_LEVELS.has(effort)
+  }
+  if (!isOpenAIReasoningEffort(effort)) {
+    return false
+  }
+
+  const catalog = await getOpenAICodexModelCatalog()
+  const model = getOpenAIModelCatalogEntry(modelId, catalog)
+  return !model || model.supportedReasoningEfforts.includes(effort)
+}
+
 function isKnownRuntimeProviderId(
   providerId: string,
   providers: Array<{ id: string }>,
@@ -2657,12 +2688,20 @@ async function getRuntimeSettings(sessionId?: string): Promise<RuntimeSettings> 
     }
 
     const userSettings = await settingsService.getUserSettings()
-    const thinking = resolveDesktopThinkingMode(userSettings)
+    const thinking = resolveDesktopThinkingMode(
+      userSettings,
+      runtimeOverride.providerId,
+    )
+    const effort = runtimeOverride.effort ?? (
+      isOpenAIOfficialProviderId(runtimeOverride.providerId)
+        ? await getDefaultOpenAIReasoningEffort(runtimeOverride.modelId)
+        : undefined
+    )
 
     return {
       permissionMode: sessionPermissionMode ?? await settingsService.getPermissionMode().catch(() => undefined),
       model: runtimeOverride.modelId,
-      effort: runtimeOverride.effort,
+      effort,
       thinking,
       providerId: runtimeOverride.providerId,
     }
@@ -2700,11 +2739,11 @@ async function getDefaultRuntimeSettings(): Promise<RuntimeSettings> {
     typeof modelSettings.modelContext === 'string' && modelSettings.modelContext.trim()
       ? modelSettings.modelContext
       : undefined
-  const effort =
+  let effort =
     typeof userSettings.effort === 'string' && userSettings.effort.trim()
       ? userSettings.effort
       : undefined
-  const thinking = resolveDesktopThinkingMode(userSettings)
+  const thinking = resolveDesktopThinkingMode(userSettings, resolvedActiveId)
 
   let model: string | undefined
   if (resolvedActiveId) {
@@ -2717,6 +2756,10 @@ async function getDefaultRuntimeSettings(): Promise<RuntimeSettings> {
     if (baseModel) {
       model = baseModel
       if (modelContext) model += `:${modelContext}`
+    }
+    if (isOpenAIOfficialProviderId(resolvedActiveId)) {
+      model = model || OPENAI_DEFAULT_MAIN_MODEL
+      effort = await getDefaultOpenAIReasoningEffort(model)
     }
   } else {
     // No provider — pass model normally
@@ -2738,7 +2781,9 @@ async function getDefaultRuntimeSettings(): Promise<RuntimeSettings> {
 
 function resolveDesktopThinkingMode(
   settings: Record<string, unknown>,
+  providerId?: string | null,
 ): 'disabled' | undefined {
+  if (isOpenAIOfficialProviderId(providerId)) return undefined
   return settings.alwaysThinkingEnabled === false ? 'disabled' : undefined
 }
 

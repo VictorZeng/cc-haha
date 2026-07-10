@@ -1004,6 +1004,7 @@ export const jp: Record<TranslationKey, string> = {
   'settings.general.effort.low': '低',
   'settings.general.effort.medium': '中',
   'settings.general.effort.high': '高',
+  'settings.general.effort.xhigh': '最高',
   'settings.general.effort.max': '最大',
   'settings.general.thinkingTitle': '思考モード',
   'settings.general.thinkingDescription': '新しいセッションをモデルの思考を有効にして開始するかどうかを制御します。オフの場合、DeepSeek などの対応プロバイダーには明示的に非思考パラメーターが渡されます。',

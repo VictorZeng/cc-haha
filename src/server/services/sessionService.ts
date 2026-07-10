@@ -312,7 +312,7 @@ const VALID_SESSION_PERMISSION_MODES = new Set([
   'bypassPermissions',
   'dontAsk',
 ])
-const VALID_SESSION_EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'max'])
+const VALID_SESSION_EFFORT_LEVELS = new Set(['low', 'medium', 'high', 'xhigh', 'max'])
 
 type ContentBlock = Record<string, unknown>
 

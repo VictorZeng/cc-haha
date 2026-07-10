@@ -13,7 +13,12 @@ import { ProviderService } from './providerService.js'
 import {
   OPENAI_CODEX_OAUTH_FILE_ENV_KEY,
   OPENAI_OAUTH_PROVIDER_ENV_KEY,
+  isOpenAIOfficialProviderId,
 } from './openaiOfficialProvider.js'
+import {
+  OPENAI_CODEX_REASONING_EFFORT_ENV_KEY,
+  isOpenAIReasoningEffort,
+} from '../../services/openaiAuth/models.js'
 import { sessionService } from './sessionService.js'
 import { diagnosticsService } from './diagnosticsService.js'
 import {
@@ -1043,11 +1048,11 @@ export class ConversationService {
       args.push('--model', options.model)
     }
 
-    if (options?.effort) {
+    if (options?.effort && !isOpenAIOfficialProviderId(options.providerId)) {
       args.push('--effort', options.effort)
     }
 
-    if (options?.thinking) {
+    if (options?.thinking && !isOpenAIOfficialProviderId(options.providerId)) {
       args.push('--thinking', options.thinking)
     }
 
@@ -1085,6 +1090,7 @@ export class ConversationService {
       'CLAUDE_CODE_MODEL_CONTEXT_WINDOWS',
       OPENAI_OAUTH_PROVIDER_ENV_KEY,
       OPENAI_CODEX_OAUTH_FILE_ENV_KEY,
+      OPENAI_CODEX_REASONING_EFFORT_ENV_KEY,
     ] as const
 
     const cleanEnv = await getProcessEnvWithTerminalShellEnvironment()
@@ -1209,6 +1215,12 @@ export class ConversationService {
       // 否则 CLI 会忽略 provider 的 AUTH_TOKEN、错误地走 OAuth 打到第三方
       // endpoint。详见 src/utils/auth.ts isManagedOAuthContext()。
       ...(explicitProviderEnv ?? {}),
+      ...(
+        isOpenAIOfficialProviderId(options?.providerId) &&
+        isOpenAIReasoningEffort(options?.effort)
+          ? { [OPENAI_CODEX_REASONING_EFFORT_ENV_KEY]: options.effort }
+          : {}
+      ),
       ...networkEnv,
       ...(this.shouldMarkManagedOAuth(options?.providerId)
         ? await this.buildOfficialOAuthEnv()
