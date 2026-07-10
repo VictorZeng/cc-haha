@@ -5,7 +5,11 @@ import { join, relative, sep } from 'node:path'
 import { loadQuarantineManifest, quarantinedPathSet } from '../quality-gate/quarantine'
 
 const root = process.cwd()
-const roots = ['src/server', 'src/tools', 'src/utils']
+// The root runtime is wider than src/server: CLI commands, query handling,
+// shared services, tools, and utils all ship in the same Bun product. Keeping a
+// single src root prevents approved CLI/core changes from receiving a green
+// server check without their existing tests ever being discovered.
+const roots = ['src']
 const excludedFiles = quarantinedPathSet(loadQuarantineManifest())
 
 function normalize(path: string) {
