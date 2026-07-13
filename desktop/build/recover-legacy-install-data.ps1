@@ -636,6 +636,7 @@ function Write-AppModeAtomically {
 function Invoke-LegacyRecovery {
   param(
     [Parameter(Mandatory = $true)][string[]]$InstallDirs,
+    [string[]]$SharedInstallDirs = @(),
     [Parameter(Mandatory = $true)][string]$UserDataDir,
     [Parameter(Mandatory = $true)][string]$RecoveryRoot,
     [Parameter(Mandatory = $true)][string]$ProcessName,
@@ -656,7 +657,11 @@ function Invoke-LegacyRecovery {
     -UserDataDir $UserDataDir `
     -ActiveConfigDir $ActiveConfigDir `
     -ActiveConfigManaged $ActiveConfigManaged
-  Assert-NoUndiscoveredLegacySources -InstallDirs $existingInstallDirs -ActiveSource $source
+  $potentialSharedInstallDirs = @(Get-PotentialInstallDirs -InstallDirs $SharedInstallDirs)
+  $existingSharedInstallDirs = @(Get-ExistingInstallDirs -InstallDirs $potentialSharedInstallDirs)
+  if ($existingSharedInstallDirs.Count -gt 0) {
+    Assert-NoUndiscoveredLegacySources -InstallDirs $existingSharedInstallDirs -ActiveSource $source
+  }
   if ([string]::IsNullOrWhiteSpace([string]$source)) {
     return $null
   }
@@ -793,6 +798,19 @@ function Run-SelfTest {
       -ActiveConfigDir '' -InstallerIdentitySafety 'untrusted-elevated' -SkipProcessCheck
     Assert-SelfTest -Condition ($null -eq $elevatedDefaultResult) -Message 'elevated default-mode reinstall was blocked without legacy data'
 
+    $perUserInstall = Join-Path $testRoot 'per-user install'
+    $perUserExternalTarget = Join-Path $testRoot 'per-user external target'
+    $perUserAppPayload = Join-Path $perUserInstall 'resources\app payload'
+    New-Item -ItemType Directory -Path (Join-Path $perUserInstall 'resources') -Force | Out-Null
+    New-Item -ItemType Directory -Path $perUserExternalTarget -Force | Out-Null
+    New-Item -ItemType Junction -Path $perUserAppPayload -Target $perUserExternalTarget | Out-Null
+    $perUserResult = Invoke-LegacyRecovery `
+      -InstallDirs @($perUserInstall) `
+      -UserDataDir (Join-Path $testRoot 'per-user app data') `
+      -RecoveryRoot (Join-Path $testRoot 'per-user recovery') -ProcessName $ProcessName `
+      -ActiveConfigDir '' -SkipProcessCheck
+    Assert-SelfTest -Condition ($null -eq $perUserResult) -Message 'per-user default-mode reinstall scanned the packaged application tree'
+
     $wrongIdentityInstall = Join-Path $testRoot 'registered shared install'
     $wrongIdentityData = Join-Path $wrongIdentityInstall 'custom data'
     New-Item -ItemType Directory -Path $wrongIdentityData -Force | Out-Null
@@ -801,7 +819,7 @@ function Run-SelfTest {
     $wrongIdentityFailed = $false
     try {
       Invoke-LegacyRecovery `
-        -InstallDirs @($wrongIdentityInstall) `
+        -InstallDirs @($wrongIdentityInstall) -SharedInstallDirs @($wrongIdentityInstall) `
         -UserDataDir (Join-Path $testRoot 'wrong identity app data') `
         -RecoveryRoot (Join-Path $testRoot 'wrong identity recovery') -ProcessName $ProcessName `
         -ActiveConfigDir '' -InstallerIdentitySafety 'untrusted-elevated' -SkipProcessCheck | Out-Null
@@ -833,7 +851,8 @@ function Run-SelfTest {
     $sharedFailed = $false
     try {
       Invoke-LegacyRecovery `
-        -InstallDirs @($sharedInstall) -UserDataDir (Join-Path $testRoot 'shared app data') `
+        -InstallDirs @($sharedInstall) -SharedInstallDirs @($sharedInstall) `
+        -UserDataDir (Join-Path $testRoot 'shared app data') `
         -RecoveryRoot (Join-Path $testRoot 'shared recovery') -ProcessName $ProcessName `
         -ActiveConfigDir $activeExternal -ActiveConfigManaged '' -SkipProcessCheck | Out-Null
     } catch {
@@ -851,7 +870,8 @@ function Run-SelfTest {
     $otherUserFailed = $false
     try {
       Invoke-LegacyRecovery `
-        -InstallDirs @($otherUserInstall) -UserDataDir $currentUserMode `
+        -InstallDirs @($otherUserInstall) -SharedInstallDirs @($otherUserInstall) `
+        -UserDataDir $currentUserMode `
         -RecoveryRoot (Join-Path $testRoot 'other user recovery') -ProcessName $ProcessName `
         -ActiveConfigDir '' -SkipProcessCheck | Out-Null
     } catch {
@@ -938,7 +958,8 @@ function Run-SelfTest {
     $junctionFailed = $false
     try {
       Invoke-LegacyRecovery `
-        -InstallDirs @($junctionInstall) -UserDataDir (Join-Path $testRoot 'junction app data') `
+        -InstallDirs @($junctionInstall) -SharedInstallDirs @($junctionInstall) `
+        -UserDataDir (Join-Path $testRoot 'junction app data') `
         -RecoveryRoot (Join-Path $testRoot 'junction recovery') -ProcessName $ProcessName `
         -ActiveConfigDir '' -SkipProcessCheck | Out-Null
     } catch {
@@ -960,6 +981,7 @@ try {
 
   $result = Invoke-LegacyRecovery `
     -InstallDirs @($PerUserInstallDir, $PerMachineInstallDir, $CandidateInstallDir) `
+    -SharedInstallDirs @($PerMachineInstallDir) `
     -UserDataDir $UserDataDir `
     -RecoveryRoot $RecoveryRoot `
     -ProcessName $ProcessName `
