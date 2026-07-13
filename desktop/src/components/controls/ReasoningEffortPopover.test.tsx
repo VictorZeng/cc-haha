@@ -47,7 +47,10 @@ describe('ReasoningEffortPopover', () => {
     expect(popover).toHaveStyle({ width: '280px' })
     expect(popover).toHaveClass('px-4', 'pb-4', 'pt-3.5')
     expect(popover.querySelectorAll('svg')).toHaveLength(0)
-    expect(screen.getByTestId('reasoning-effort-label')).toHaveClass('mb-3', 'text-[15px]')
+    expect(screen.getByTestId('reasoning-effort-header')).toHaveClass('mb-3', 'justify-between')
+    expect(screen.getByTestId('reasoning-effort-label')).toHaveClass('text-[15px]')
+    expect(screen.getByTestId('reasoning-effort-context-label')).toHaveClass('text-[11px]')
+    expect(screen.getByTestId('reasoning-effort-context-label')).toHaveTextContent('推理强度')
     expect(screen.getByRole('slider', { name: '推理强度' })).toHaveClass('h-11')
     expect(screen.getByTestId('reasoning-effort-track')).toHaveClass('h-[30px]')
     expect(screen.getByTestId('reasoning-effort-thumb')).toHaveClass('h-10', 'w-10')
@@ -63,7 +66,8 @@ describe('ReasoningEffortPopover', () => {
     expect(slider).toHaveAttribute('aria-valuetext', '极高')
     expect(screen.getAllByTestId('reasoning-effort-stop')).toHaveLength(5)
     expect(screen.getByText('极高')).toBeInTheDocument()
-    expect(screen.getByTestId('reasoning-effort-fill')).toHaveClass('bg-[#3798f7]')
+    expect(screen.getByTestId('reasoning-effort-fill')).toHaveClass('bg-[var(--color-brand)]')
+    expect(slider).toHaveClass('focus-visible:ring-[var(--color-brand)]')
   })
 
   it('selects a discrete stop from the track', () => {

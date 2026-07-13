@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import type { RuntimeSelection } from '../types/runtime'
+import type { SessionListItem } from '../types/session'
 
 const STORAGE_KEY = 'cc-haha-session-runtime'
 
@@ -10,6 +11,7 @@ type SessionRuntimeStore = {
   setSelection: (key: string, selection: RuntimeSelection) => void
   clearSelection: (key: string) => void
   moveSelection: (fromKey: string, toKey: string) => void
+  syncFromSessions: (sessions: SessionListItem[]) => void
 }
 
 function loadSelections(): Record<string, RuntimeSelection> {
@@ -63,6 +65,32 @@ export const useSessionRuntimeStore = create<SessionRuntimeStore>((set) => ({
         ...rest,
         [toKey]: selection,
       }
+      persistSelections(selections)
+      return { selections }
+    }),
+
+  syncFromSessions: (sessions) =>
+    set((state) => {
+      let selections = state.selections
+      for (const session of sessions) {
+        if (!session.runtimeModelId || session.runtimeProviderId === undefined) continue
+        const selection: RuntimeSelection = {
+          providerId: session.runtimeProviderId,
+          modelId: session.runtimeModelId,
+          ...(session.effortLevel ? { effortLevel: session.effortLevel } : {}),
+        }
+        const current = selections[session.id]
+        if (
+          current?.providerId === selection.providerId &&
+          current.modelId === selection.modelId &&
+          current.effortLevel === selection.effortLevel
+        ) {
+          continue
+        }
+        if (selections === state.selections) selections = { ...state.selections }
+        selections[session.id] = selection
+      }
+      if (selections === state.selections) return state
       persistSelections(selections)
       return { selections }
     }),

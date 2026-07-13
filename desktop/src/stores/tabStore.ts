@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { sessionsApi } from '../api/sessions'
 import { dropSession as dropVirtualHeightSession } from '../components/chat/virtualHeightCache'
 import { destroyTerminalRuntime } from '../lib/terminalRuntime'
+import { useSessionRuntimeStore } from './sessionRuntimeStore'
 
 const TAB_STORAGE_KEY = 'cc-haha-open-tabs'
 
@@ -351,6 +352,7 @@ export const useTabStore = create<TabStore>((set, get) => ({
       ) {
         return
       }
+      useSessionRuntimeStore.getState().syncFromSessions(sessions)
       const existingIds = new Set(sessions.map((s) => s.id))
 
       const validTabs: Tab[] = data.openTabs

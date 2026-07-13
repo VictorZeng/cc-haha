@@ -111,10 +111,21 @@ export function ReasoningEffortPopover({
       style={{ bottom: position.bottom, left: position.left, width: position.width }}
     >
       <div
-        data-testid="reasoning-effort-label"
-        className="mb-3 text-[15px] font-semibold text-[var(--color-text-secondary)]"
+        data-testid="reasoning-effort-header"
+        className="mb-3 flex items-baseline justify-between gap-3"
       >
-        {labels[value]}
+        <div
+          data-testid="reasoning-effort-label"
+          className="text-[15px] font-semibold text-[var(--color-text-secondary)]"
+        >
+          {labels[value]}
+        </div>
+        <div
+          data-testid="reasoning-effort-context-label"
+          className="text-[11px] font-medium tracking-wide text-[var(--color-text-tertiary)]"
+        >
+          {ariaLabel}
+        </div>
       </div>
 
       <div
@@ -126,7 +137,7 @@ export function ReasoningEffortPopover({
         aria-valuemax={maxIndex}
         aria-valuenow={selectedIndex}
         aria-valuetext={labels[value]}
-        className="group relative flex h-11 touch-none cursor-pointer items-center outline-none focus-visible:ring-2 focus-visible:ring-[#3798f7] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--color-surface-container-lowest)]"
+        className="group relative flex h-11 touch-none cursor-pointer items-center outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-brand)] focus-visible:ring-offset-4 focus-visible:ring-offset-[var(--color-surface-container-lowest)]"
         onClick={(event) => selectFromClientX(event.clientX)}
         onPointerDown={(event) => {
           draggingRef.current = true
@@ -175,7 +186,7 @@ export function ReasoningEffortPopover({
         >
           <div
             data-testid="reasoning-effort-fill"
-            className="h-full rounded-full bg-[#3798f7] transition-[width] duration-200 motion-reduce:transition-none"
+            className="h-full rounded-full bg-[var(--color-brand)] transition-[width] duration-200 motion-reduce:transition-none"
             style={{ width: `${fillPercent}%` }}
           />
         </div>

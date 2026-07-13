@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { sessionsApi } from '../api/sessions'
+import { useSessionRuntimeStore } from './sessionRuntimeStore'
 import { SETTINGS_TAB_ID, MARKET_TAB_ID, useTabStore } from './tabStore'
 
 vi.mock('../api/sessions', () => ({
@@ -12,6 +13,7 @@ describe('tabStore', () => {
   beforeEach(() => {
     useTabStore.setState({ tabs: [], activeTabId: null })
     localStorage.clear()
+    useSessionRuntimeStore.setState({ selections: {} })
     vi.mocked(sessionsApi.list).mockResolvedValue({ sessions: [] } as never)
   })
 
@@ -194,6 +196,36 @@ describe('tabStore', () => {
       },
     ])
     expect(useTabStore.getState().activeTabId).toBe(MARKET_TAB_ID)
+  })
+
+  it('hydrates restored tabs with authoritative transcript runtime metadata', async () => {
+    useSessionRuntimeStore.getState().setSelection('session-1', {
+      providerId: null,
+      modelId: 'gpt-5.4',
+      effortLevel: 'max',
+    })
+    localStorage.setItem('cc-haha-open-tabs', JSON.stringify({
+      openTabs: [{ sessionId: 'session-1', title: 'Runtime session', type: 'session' }],
+      activeTabId: 'session-1',
+    }))
+    vi.mocked(sessionsApi.list).mockResolvedValue({
+      sessions: [{
+        id: 'session-1',
+        title: 'Runtime session',
+        runtimeProviderId: 'provider-latest',
+        runtimeModelId: 'anthropic/claude-opus-4.7',
+        effortLevel: 'max',
+      }],
+      total: 1,
+    } as never)
+
+    await useTabStore.getState().restoreTabs()
+
+    expect(useSessionRuntimeStore.getState().selections['session-1']).toEqual({
+      providerId: 'provider-latest',
+      modelId: 'anthropic/claude-opus-4.7',
+      effortLevel: 'max',
+    })
   })
 
   it('canonicalizes mismatched persisted special tab ids and types during restore', async () => {

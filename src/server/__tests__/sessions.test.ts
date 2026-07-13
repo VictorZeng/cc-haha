@@ -1686,6 +1686,29 @@ describe('SessionService', () => {
     expect((await service.getSessionLaunchInfo(sessionId))?.permissionMode).toBe('auto')
   })
 
+  it('should expose the latest runtime selection in the session list', async () => {
+    const workDir = '/tmp/runtime-list-metadata'
+    const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+    await writeSessionFile(sanitizePath(workDir), sessionId, [
+      makeSnapshotEntry(),
+      {
+        ...makeSessionMetaEntry(workDir),
+        runtimeProviderId: 'provider-latest',
+        runtimeModelId: 'anthropic/claude-opus-4.7',
+        effortLevel: 'max',
+      },
+      makeUserEntry('Use the latest runtime metadata'),
+    ])
+
+    const listed = (await service.listSessions()).sessions.find((session) => session.id === sessionId)
+
+    expect(listed).toMatchObject({
+      runtimeProviderId: 'provider-latest',
+      runtimeModelId: 'anthropic/claude-opus-4.7',
+      effortLevel: 'max',
+    })
+  })
+
   it('should not append duplicate runtime metadata when it already matches', async () => {
     const workDir = '/tmp/runtime-idempotent'
     const sessionId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'

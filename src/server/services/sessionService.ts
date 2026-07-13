@@ -61,6 +61,9 @@ export type SessionListItem = {
   workDir: string | null
   workDirExists: boolean
   permissionMode?: string
+  runtimeProviderId?: string | null
+  runtimeModelId?: string
+  effortLevel?: string
 }
 
 export type DeleteSessionFailure = {
@@ -2459,6 +2462,11 @@ export class SessionService {
           workDir,
           workDirExists,
           permissionMode: summary.permissionMode,
+          ...(summary.runtimeProviderId !== undefined
+            ? { runtimeProviderId: summary.runtimeProviderId }
+            : {}),
+          ...(summary.runtimeModelId ? { runtimeModelId: summary.runtimeModelId } : {}),
+          ...(summary.effortLevel ? { effortLevel: summary.effortLevel } : {}),
         })
       } catch {
         // Skip unreadable files
