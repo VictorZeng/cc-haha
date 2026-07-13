@@ -435,6 +435,21 @@ describe('PermissionModeSelector', () => {
     expect(screen.getByRole('menuitem', { name: /Auto mode/ })).toBeInTheDocument()
   })
 
+  it('uses the automatic-execution glyph for Auto mode', () => {
+    const { rerender } = render(
+      <PermissionModeSelector value="default" onChange={vi.fn()} />,
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ask permissions' }))
+    const autoItem = screen.getByRole('menuitem', { name: /Auto mode/ })
+    expect(autoItem.querySelector('.material-symbols-outlined')).toHaveTextContent('autoplay')
+    expect(autoItem.querySelector('.material-symbols-outlined')).not.toHaveTextContent('auto_awesome')
+
+    rerender(<PermissionModeSelector value="auto" onChange={vi.fn()} />)
+    expect(screen.getByRole('button', { name: 'Auto mode' }))
+      .toHaveTextContent('autoplay')
+  })
+
   it('does not change mode when first-use Auto confirmation is cancelled', () => {
     const onChange = vi.fn()
     useSettingsStore.setState({ autoModeOptInAccepted: false } as never)
